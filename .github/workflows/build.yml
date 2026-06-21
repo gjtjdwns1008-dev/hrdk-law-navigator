@@ -1,0 +1,76 @@
+# .github/workflows/build.yml
+# ───────────────────────────────────────────────────────────────
+# 하는 일: 구글시트 → site_builder.py로 index.html 생성 → GitHub Pages 배포.
+# 서버 상시 운영 아님. 스케줄/수동으로 잠깐 켜졌다 꺼지는 배치.
+#
+# 사전 1회 설정 (깃허브 웹에서):
+#   1) Settings → Secrets and variables → Actions → 시크릿 2개 등록
+#        GCP_SA_JSON      : 서비스계정 JSON 전체 문자열 (monitor에 넣은 값과 동일)
+#        GOOGLE_SHEET_ID  : 모니터링 마스터 시트 KEY 또는 URL
+#   2) Settings → Pages → Source = "GitHub Actions" 로 변경
+#   ※ 이 두 가지를 안 하면 워크플로우가 시트를 못 읽거나 배포가 실패함.
+# ───────────────────────────────────────────────────────────────
+name: Build & Deploy navigator site
+
+on:
+  schedule:
+    - cron: "0 23 * * *"          # 매일 08:00 KST (UTC+9). 모니터 배치 이후 시각으로 조정 가능.
+  workflow_dispatch:               # 깃허브에서 수동 실행 버튼
+  push:
+    branches: [ main ]             # 코드 수정해서 push하면 자동 재배포
+    paths:
+      - "site_builder.py"
+      - "requirements.txt"
+      - ".github/workflows/build.yml"
+
+# GitHub Pages 배포에 필요한 권한
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시에 여러 배포가 겹치지 않게
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 사이트 생성 (시트 → dist/index.html)
+        env:
+          GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          # 선택 옵션 (필요할 때만 주석 해제):
+          # SOURCE_WORKSHEET: "연관 높은 법령"
+          # TARGET_MONTH: ""        # 비우면 데이터의 가장 최근 달 자동
+          # MAX_CARDS: "300"
+        run: python site_builder.py
+
+      - name: 결과물(dist) 업로드
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: GitHub Pages 배포
+        id: deployment
+        uses: actions/deploy-pages@v4
