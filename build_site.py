@@ -84,16 +84,39 @@ def load_monitor():
     gc = _client(os.environ["GCP_SA_JSON"])
     return gc.open_by_key(_sheet_key(os.environ["GOOGLE_SHEET_ID"])).worksheet(ws).get_all_records()
 
+def _nospace(s): return re.sub(r"\s+", "", str(s or ""))
+def _detail_map(rows):
+    """국가기술자격 관련법령 탭 → {법령명(공백제거): 상세 분석 결과} 매핑."""
+    m = {}
+    for r in rows:
+        ln = _nospace(r.get("법령명"))
+        d = str(r.get("상세 분석 결과") or "").strip()
+        if ln and d and ln not in m:
+            m[ln] = d
+    return m
+
 def load_radar():
+    """(우대사항_대장 행들, 상세분석 맵) 반환. 대장=뼈대, 관련법령=상세분석 보강."""
+    ws  = os.environ.get("RADAR_WORKSHEET", "우대사항_대장")
+    dws = os.environ.get("RADAR_DETAIL_WORKSHEET", "국가기술자격 관련법령")
     lx = os.environ.get("LOCAL_XLSX_RADAR", "").strip()
-    ws = os.environ.get("RADAR_WORKSHEET", "우대사항_대장")
     if lx:
         import pandas as pd
         sh = os.environ.get("LOCAL_SHEET_RADAR", ws)
-        return pd.read_excel(lx, sheet_name=sh).fillna("").to_dict("records")
+        led = pd.read_excel(lx, sheet_name=sh).fillna("").to_dict("records")
+        try:
+            det = pd.read_excel(lx, sheet_name=dws).fillna("").to_dict("records")
+        except Exception:
+            det = []
+        return led, _detail_map(det)
     raw = os.environ.get("RADAR_SA_JSON", "").strip() or os.environ["GCP_SA_JSON"].strip()
-    gc = _client(raw)
-    return gc.open_by_key(_sheet_key(os.environ["RADAR_SHEET_ID"])).worksheet(ws).get_all_records()
+    ss = _client(raw).open_by_key(_sheet_key(os.environ["RADAR_SHEET_ID"]))
+    led = ss.worksheet(ws).get_all_records()
+    try:
+        det = ss.worksheet(dws).get_all_records()
+    except Exception:
+        det = []
+    return led, _detail_map(det)
 
 
 # ───────── monitor 데이터/카드 ─────────
@@ -124,23 +147,22 @@ def m_card(d, i):
 
 
 # ───────── radar 데이터/카드 ─────────
-def r_sample_jobs(cert): return int(hashlib.md5(cert.encode()).hexdigest(), 16) % 140
 def r_pref_idx(p): return PREF_ORDER.index(p) if p in PREF_ORDER else len(PREF_ORDER)
 
-def r_build(rows):
-    entries = []                 # 고유 우대조항(법령·조문 단위) — 한 번만 저장
-    cert_map = defaultdict(list) # 자격증 -> entries 인덱스 목록(참조만)
+def r_build(rows, detail_map):
+    entries = []                 # 고유 우대조항(법령·조문 단위)
+    cert_map = defaultdict(list) # 자격증 -> entries 인덱스 참조
     for r in rows:
         certs = [c.strip() for c in re.split(r"[,/·\n]", str(r.get(RCOL["certs"]) or "")) if c.strip()]
         if not certs: continue
+        law = str(r.get(RCOL["law"]) or "").strip()
         sjb = str(r.get(RCOL["sjb"]) or "").strip() not in ("","비대상","해당없음")
-        e = {"law":str(r.get(RCOL["law"]) or "").strip(),
-             "a":str(r.get(RCOL["article"]) or "").strip(),
+        e = {"law":law, "a":str(r.get(RCOL["article"]) or "").strip(),
              "p":str(r.get(RCOL["pref"]) or "").strip() or "기타",
              "t1":tok(r.get(RCOL["t1type"])), "t1r":tok(r.get(RCOL["t1risk"])), "t2":tok(r.get(RCOL["t2"])),
              "s":1 if sjb else 0}
-        note = str(r.get(RCOL["note"]) or "").strip()
-        if note: e["d"] = note
+        det = detail_map.get(_nospace(law), "")   # 관련법령 탭의 상세 분석 결과
+        if det: e["d"] = det
         ei = len(entries); entries.append(e)
         for c in certs: cert_map[c].append(ei)
     items = sorted(cert_map.items(), key=lambda kv: len({entries[ei]["law"] for ei in kv[1]}), reverse=True)[:R_MAX]
@@ -148,7 +170,7 @@ def r_build(rows):
     for cert, idxs in items:
         prefs = [p for p,_ in Counter(entries[ei]["p"] for ei in idxs).most_common()]
         idxs_sorted = sorted(idxs, key=lambda ei:(r_pref_idx(entries[ei]["p"]), entries[ei]["law"]))
-        certs_out.append({"cert":cert, "jobs":r_sample_jobs(cert), "prefs":prefs,
+        certs_out.append({"cert":cert, "prefs":prefs,
                           "law_count":len({entries[ei]["law"] for ei in idxs}),
                           "sjb":any(entries[ei]["s"] for ei in idxs), "idx":idxs_sorted})
     return certs_out, entries, len(cert_map)
@@ -158,9 +180,7 @@ def r_card(d, i):
     sjb = ' · <span class="sjb">⚠ 중대재해처벌법 관련</span>' if d["sjb"] else ""
     return f"""
     <article class="card rcard" data-i="{i}">
-      <div class="card-top"><h3 class="cert"><button type="button" class="title-btn">{esc(d['cert'])}</button></h3>
-        <div class="jobs"><b>{d['jobs']}</b><span>건<i>예시</i></span></div></div>
-      <div class="jobs-l">워크넷 실시간 채용</div>
+      <h3 class="cert"><button type="button" class="title-btn">{esc(d['cert'])}</button></h3>
       <div class="pfs">{badges}</div>
       <div class="card-foot"><span class="lc">우대 법령 {d['law_count']}개{sjb}</span>
         <button type="button" class="detail-link">우대 근거 상세 →</button></div>
@@ -181,7 +201,8 @@ def build():
     m_cards = "\n".join(m_card(d,i) for i,d in enumerate(mdata)) or '<p class="empty">표시할 법령이 없습니다.</p>'
 
     # radar
-    rcerts, rentries, r_total = r_build(load_radar())
+    rrows, rdetail = load_radar()
+    rcerts, rentries, r_total = r_build(rrows, rdetail)
     r_cards = "\n".join(r_card(d,i) for i,d in enumerate(rcerts)) or '<p class="empty">자료가 없습니다.</p>'
 
     out = PAGE
@@ -263,10 +284,7 @@ PAGE = r"""<!DOCTYPE html>
   .card-foot .ext{font-size:12.5px;color:var(--muted);text-decoration:none;} .card-foot .ext:hover{color:var(--navy);text-decoration:underline;}
   .empty,.noresult{color:var(--muted);text-align:center;padding:40px 0;} .noresult{display:none;}
   /* radar 카드 */
-  .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;} .cert{margin:0;}
-  .jobs{text-align:right;white-space:nowrap;line-height:1;} .jobs b{font-size:24px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;}
-  .jobs span{font-size:12px;color:var(--muted);margin-left:2px;} .jobs i{font-style:normal;font-size:10px;background:#EEF0F4;color:#8A8F98;border-radius:4px;padding:1px 4px;margin-left:4px;vertical-align:top;}
-  .jobs-l{text-align:right;font-size:11.5px;color:var(--muted);margin-top:2px;}
+  .cert{margin:0;}
   .pfs{display:flex;flex-wrap:wrap;gap:6px;margin:13px 0 4px;}
   .pf{font-size:12px;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff);border-radius:999px;padding:3px 10px;}
   .lc{font-size:12.5px;color:var(--muted);} .sjb{color:#C0492F;font-weight:600;}
@@ -284,7 +302,6 @@ PAGE = r"""<!DOCTYPE html>
   .m-arts{margin:0;padding-left:18px;} .m-arts li{font-size:14px;line-height:1.7;} .m-none{color:var(--muted);font-size:14px;}
   .m-ext{display:inline-block;margin-top:24px;background:var(--navy);color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:11px 18px;border-radius:9px;}
   .m-cert{margin:0;font-size:23px;font-weight:800;color:var(--ink);padding-right:30px;}
-  .m-jobs{margin-top:8px;font-size:14px;color:var(--body);} .m-jobs b{color:var(--accent);font-size:17px;} .m-jobs i{font-style:normal;font-size:10px;background:#EEF0F4;color:#8A8F98;border-radius:4px;padding:1px 5px;margin-left:4px;}
   .m-pfs{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;}
   .law{padding:11px 0;border-bottom:1px solid #F0F2F5;cursor:pointer;} .law:last-child{border-bottom:none;} .law:hover{background:#FAFBFC;}
   .law-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -338,8 +355,7 @@ PAGE = r"""<!DOCTYPE html>
   <div class="hero"><div class="wrap">
     <div class="eyebrow">자격증으로 찾아보기</div>
     <h1>내 자격증, 어떤 법에서 우대받나요?</h1>
-    <p class="lead">자격증을 고르면 그 자격으로 우대(의무고용·직무권한·인사우대·시험면제 등)받는 법령과 채용 수요를 한눈에 봅니다.</p>
-    <div class="note">※ 채용 건수는 레이아웃 <b>예시</b>입니다. 실제 배포 시 워크넷 실시간 수치로 표시됩니다.</div>
+    <p class="lead">자격증을 고르면 그 자격으로 우대(의무고용·직무권한·인사우대·시험면제 등)받는 법령과 근거를 한눈에 봅니다.</p>
   </div></div>
   <div class="toolbar"><div class="wrap"><div class="trow">
     <div class="search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -423,7 +439,7 @@ function openCert(i){var d=RCERTS[i];if(!d)return;
     if(l.s)tags+=' <span class="tag-sjb">중처법</span>';
     return '<div class="law" data-ei="'+ei+'"><div class="law-h">'+pfBadge(l.p)+'<span class="law-name">'+escq(l.law)+'</span>'+tags+'<span class="law-go">상세 →</span></div><div class="law-m">'+escq(l.a)+'</div></div>';
   }).join('');
-  mb.innerHTML='<h2 class="m-cert">'+escq(d.cert)+'</h2><div class="m-jobs">워크넷 실시간 채용 <b>'+d.jobs+'건</b><i>예시</i></div>'
+  mb.innerHTML='<h2 class="m-cert">'+escq(d.cert)+'</h2>'
     +'<div class="m-pfs">'+pfs+'</div><div class="m-sec"><h4>이 자격증을 우대하는 법령 ('+(d.idx||[]).length+'건)</h4>'+laws+'</div>';
   openM(modal);}
 // radar 법령 상세(2차)
