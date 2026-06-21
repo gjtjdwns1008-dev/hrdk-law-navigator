@@ -1,28 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-site_builder.py — 대국민 법령 네비게이터 정적 사이트 빌더 (v3)
+site_builder.py — 대국민 법령 네비게이터 정적 사이트 빌더 (v4)
 ================================================================
 
 [하는 일]
-  구글 시트(모니터링 마스터 DB)에서 최신 분석 결과를 읽어,
-  국민이 보기 좋은 공개용 정적 HTML(index.html)을 한 장 찍어낸다.
-  서버가 필요 없다 — GitHub Actions 배치가 이 파일을 실행해
-  결과 HTML을 GitHub Pages로 올리면 그게 곧 공개 웹사이트가 된다.
+  구글 시트(모니터링 마스터 DB)에서 분석 결과를 읽어, 공개용 정적 HTML을 굽는다.
+  서버 불필요 — GitHub Actions가 실행해 GitHub Pages로 올리면 그게 공개 웹사이트.
 
-[구성]
-  - 첫 화면 카드: 요약만 (요약문 3줄, 근거조문은 카드에서 제외).
-  - 법령명/“분석 상세 보기” 클릭 → 같은 페이지 팝업(모달)에서 전체 분석.
-  - 분야 분류는 사용하지 않는다(여러 종목이 섞이면 한 분야로 단정 불가).
-  - 상단 검색창으로만 거른다(법령명·자격명칭·상세내용).
+[v4 변경점]
+  - 기간: 올해 1월 1일 ~ 오늘까지 '전체'를 표시(기존엔 최근 한 달만).
+    상단에 "2026.01.01 ~ 오늘(YYYY.MM.DD)" 기간을 표기.
+  - 검색: 검색창 옆 드롭다운으로 범위 선택(전체 / 법령명 / 자격명칭 / 상세내용).
 
 [설계 원칙]
-  - 외부 레포 의존이 없다. 구글시트만 읽으면 되므로 시트 인증을 자체 포함한다.
-  - 기존 배치 코드(main/brain/config)는 건드리지 않는다. 별도 레포의 단독 모듈.
+  - 외부 레포 의존 없음(시트 인증 자체 포함). 기존 배치 코드는 미수정.
 
 [실행 모드]
   1) 운영(기본): GCP_SA_JSON, GOOGLE_SHEET_ID, SOURCE_WORKSHEET(기본 "연관 높은 법령")
   2) 미리보기: LOCAL_XLSX, LOCAL_SHEET
-[옵션] TARGET_MONTH(YYYYMM, 비우면 최근 달) · MAX_CARDS(기본 300) · OUT_DIR(기본 dist)
+[옵션]
+  START_DATE(YYYYMMDD, 기본 올해 1월 1일) · TARGET_MONTH(YYYYMM; 넣으면 그 달만)
+  MAX_CARDS(기본 5000) · OUT_DIR(기본 dist)
 
 실행:  python site_builder.py
 """
@@ -35,28 +33,29 @@ import datetime
 from urllib.parse import quote
 
 # ─────────────────────────────────────────────────────────────
-# 0. 설정 — 시트 컬럼 이름 (헤더가 바뀌면 여기만 수정)
+# 0. 설정
 # ─────────────────────────────────────────────────────────────
 COL = {
     "law":      "법령명",
     "ministry": "소관부처",
     "date":     "시행일자",
     "kind":     "개정유형",
-    "summary1": "활용도 분석 상세",       # 자격증 활용 분석
-    "summary2": "주요 제·개정내용",        # 법령의 주요 변경 내용
+    "summary1": "활용도 분석 상세",
+    "summary2": "주요 제·개정내용",
     "certs":    "법령 관련 국가기술자격 종목",
     "article":  "근거조문",
-    "link":     "조문별 다이렉트 링크",     # 있으면 우선 사용
+    "link":     "조문별 다이렉트 링크",
 }
 
 SOURCE_WORKSHEET = os.environ.get("SOURCE_WORKSHEET", "연관 높은 법령")
-TARGET_MONTH     = os.environ.get("TARGET_MONTH", "").strip()
-MAX_CARDS        = int(os.environ.get("MAX_CARDS", "300"))
+TARGET_MONTH     = os.environ.get("TARGET_MONTH", "").strip()       # 넣으면 그 달만
+START_DATE       = os.environ.get("START_DATE", f"{datetime.date.today().year}0101").strip()
+MAX_CARDS        = int(os.environ.get("MAX_CARDS", "5000"))
 OUT_DIR          = os.environ.get("OUT_DIR", "dist")
 
 
 # ─────────────────────────────────────────────────────────────
-# 1. 데이터 로드 — 운영(시트) / 미리보기(xlsx) 통합
+# 1. 데이터 로드
 # ─────────────────────────────────────────────────────────────
 def _sheet_key(v: str) -> str:
     m = re.search(r"/d/([A-Za-z0-9_-]+)", str(v or ""))
@@ -64,7 +63,7 @@ def _sheet_key(v: str) -> str:
 
 
 def _open_spreadsheet():
-    import gspread  # 운영 모드에서만 필요
+    import gspread
     creds_dict = json.loads(os.environ["GCP_SA_JSON"].strip(), strict=False)
     key = _sheet_key(os.environ["GOOGLE_SHEET_ID"])
     gc = gspread.service_account_from_dict(creds_dict)
@@ -107,7 +106,7 @@ def esc(v) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# 3. 행 → 정제된 필드 묶음 (카드와 팝업이 함께 사용)
+# 3. 행 → 정제된 필드 묶음
 # ─────────────────────────────────────────────────────────────
 def card_fields(row) -> dict:
     certs = [c.strip() for c in re.split(r"[,/·\n]", str(row.get(COL["certs"]) or "")) if c.strip()]
@@ -119,8 +118,8 @@ def card_fields(row) -> dict:
         "law":          str(row.get(COL["law"]) or "").strip(),
         "meta":         " · ".join(x for x in [ministry, date, kind] if x),
         "certs":        certs,
-        "summary_main": str(row.get(COL["summary2"]) or "").strip(),  # 주요 제·개정내용
-        "summary_use":  str(row.get(COL["summary1"]) or "").strip(),  # 활용도 분석 상세
+        "summary_main": str(row.get(COL["summary2"]) or "").strip(),
+        "summary_use":  str(row.get(COL["summary1"]) or "").strip(),
         "articles":     articles,
         "url":          law_url(row),
     }
@@ -134,10 +133,15 @@ def render_card(d: dict, i: int) -> str:
         chips += f'<span class="chip chip-more">+{extra}</span>'
 
     summary = esc(d["summary_use"] or d["summary_main"] or "요약 준비 중입니다.")
-    haystack = esc(f'{d["law"]} {d["meta"]} {" ".join(d["certs"])} {d["summary_use"]} {d["summary_main"]}').lower()
+
+    # 검색 범위별 데이터 (드롭다운에서 고른 범위만 훑음)
+    q_law    = esc(d["law"]).lower()
+    q_cert   = esc(" ".join(d["certs"])).lower()
+    q_detail = esc(f'{d["summary_use"]} {d["summary_main"]} {d["meta"]}').lower()
+    q_all    = esc(f'{d["law"]} {d["meta"]} {" ".join(d["certs"])} {d["summary_use"]} {d["summary_main"]}').lower()
 
     return f"""
-    <article class="card" data-i="{i}" data-q="{haystack}">
+    <article class="card" data-i="{i}" data-q-all="{q_all}" data-q-law="{q_law}" data-q-cert="{q_cert}" data-q-detail="{q_detail}">
       <div class="card-head">{esc(d['meta'])}</div>
       <h3 class="card-title"><button type="button" class="title-btn">{esc(d['law'])}</button></h3>
       <div class="chips">{chips}</div>
@@ -153,16 +157,24 @@ def render_card(d: dict, i: int) -> str:
 # 4. 페이지 조립
 # ─────────────────────────────────────────────────────────────
 def build_html(rows) -> str:
-    months = sorted({digits(r.get(COL["date"]))[:6] for r in rows if digits(r.get(COL["date"]))})
-    month = TARGET_MONTH or (months[-1] if months else "")
-    if month:
-        rows = [r for r in rows if digits(r.get(COL["date"])).startswith(month)]
+    today = datetime.date.today().strftime("%Y%m%d")
+
+    if TARGET_MONTH:  # 특정 달만 보기(옵션)
+        rows = [r for r in rows if digits(r.get(COL["date"])).startswith(TARGET_MONTH)]
+        period = f"{TARGET_MONTH[:4]}.{TARGET_MONTH[4:6]}"
+    else:             # 기본: 올해 1월 1일 ~ 오늘 전체
+        rows = [r for r in rows if (len(digits(r.get(COL["date"]))) == 8
+                                    and START_DATE <= digits(r.get(COL["date"])) <= today)]
+        def p(d8): return f"{d8[:4]}.{d8[4:6]}.{d8[6:]}"
+        period = f"{p(START_DATE)} ~ 오늘({p(today)})"
+
+    # 최신순 정렬 후 상한 적용
+    rows.sort(key=lambda r: digits(r.get(COL["date"])), reverse=True)
     rows = rows[:MAX_CARDS]
 
     data = [card_fields(r) for r in rows]
     total_laws = len(data)
     total_certs = len({c for d in data for c in d["certs"]})
-    month_label = f"{month[:4]}년 {int(month[4:6])}월" if len(month) == 6 else "최근"
     built_at = datetime.datetime.now().strftime("%Y.%m.%d")
 
     cards = "\n".join(render_card(d, i) for i, d in enumerate(data)) or \
@@ -171,7 +183,7 @@ def build_html(rows) -> str:
 
     out = PAGE
     for k, v in {
-        "@@MONTH_LABEL@@": month_label,
+        "@@PERIOD@@":      period,
         "@@TOTAL_LAWS@@":  str(total_laws),
         "@@TOTAL_CERTS@@": str(total_certs),
         "@@CARDS@@":       cards,
@@ -192,7 +204,7 @@ def main():
 
 
 # ─────────────────────────────────────────────────────────────
-# 5. HTML 템플릿 (디자인은 한 번만 정의 — 내용은 @@토큰@@으로 자동 주입)
+# 5. HTML 템플릿
 # ─────────────────────────────────────────────────────────────
 PAGE = r"""<!DOCTYPE html>
 <html lang="ko">
@@ -240,11 +252,16 @@ PAGE = r"""<!DOCTYPE html>
   .stat .n { font-size:30px; font-weight:700; color:var(--navy); font-variant-numeric:tabular-nums; line-height:1; }
   .stat .l { font-size:13px; color:var(--muted); margin-top:5px; }
 
-  /* 검색 바 (분야 필터 제거 — 검색만, 크게) */
+  /* 검색 바 (드롭다운 + 검색) */
   .toolbar { position:sticky; top:0; z-index:5; background:rgba(246,248,251,.92);
     backdrop-filter:saturate(160%) blur(6px); border-bottom:1px solid var(--line); }
   .toolbar .wrap { padding:16px 20px; }
-  .search { position:relative; max-width:100%; }
+  .searchbar { display:flex; gap:10px; align-items:stretch; }
+  .scope { border:1px solid var(--line); border-radius:12px; background:var(--surface);
+    color:var(--ink); font-size:14.5px; font-family:inherit; padding:0 14px; cursor:pointer;
+    outline:none; flex:0 0 auto; }
+  .scope:focus { border-color:var(--navy); box-shadow:0 0 0 3px rgba(31,56,100,.12); }
+  .search { position:relative; flex:1; }
   .search input { width:100%; border:1px solid var(--line); border-radius:12px;
     padding:14px 16px 14px 46px; font-size:15.5px; font-family:inherit;
     background:var(--surface); color:var(--ink); outline:none;
@@ -277,7 +294,6 @@ PAGE = r"""<!DOCTYPE html>
   .empty { color:var(--muted); padding:40px 0; text-align:center; }
   .noresult { display:none; color:var(--muted); padding:40px 0; text-align:center; }
 
-  /* 팝업(모달) */
   .modal { position:fixed; inset:0; z-index:50; display:none; }
   .modal.open { display:block; }
   .modal-backdrop { position:absolute; inset:0; background:rgba(16,36,63,.45); }
@@ -307,6 +323,7 @@ PAGE = r"""<!DOCTYPE html>
 
   @media (max-width:560px) {
     .grid { grid-template-columns:1fr; }
+    .searchbar { flex-direction:column; }
     .modal-panel { margin:0; min-height:100vh; border-radius:0; max-height:100vh; }
   }
   .card { opacity:0; animation:rise .4s ease forwards; }
@@ -327,9 +344,9 @@ PAGE = r"""<!DOCTYPE html>
   </div></header>
 
   <section class="hero"><div class="wrap">
-    <div class="eyebrow">@@MONTH_LABEL@@ 업데이트</div>
-    <h1>이번 달, 당신의 자격증과 관련해<br><strong>@@TOTAL_LAWS@@건</strong>의 법령이 바뀌었습니다.</h1>
-    <p class="lead">매일 새벽 국가법령정보센터를 자동으로 살펴, 국가기술자격과 관련된 제·개정 법령만 골라 정리합니다. 카드를 누르면 전체 분석을 볼 수 있어요.</p>
+    <div class="eyebrow">@@PERIOD@@ 누적</div>
+    <h1>이 기간 동안, 자격증과 관련된<br><strong>@@TOTAL_LAWS@@건</strong>의 법령이 바뀌었습니다.</h1>
+    <p class="lead">매일 새벽 국가법령정보센터를 자동으로 살펴, 국가기술자격과 관련된 제·개정 법령만 골라 정리합니다. 아래에서 검색하거나 카드를 눌러 전체 분석을 볼 수 있어요.</p>
     <div class="stats">
       <div class="stat"><div class="n">@@TOTAL_LAWS@@</div><div class="l">관련 법령</div></div>
       <div class="stat"><div class="n">@@TOTAL_CERTS@@</div><div class="l">연관 자격종목</div></div>
@@ -337,9 +354,17 @@ PAGE = r"""<!DOCTYPE html>
   </div></section>
 
   <div class="toolbar"><div class="wrap">
-    <div class="search">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input id="q" type="search" placeholder="법령명, 자격명칭, 상세내용 검색을 통해 관심내용을 확인하세요!" aria-label="검색">
+    <div class="searchbar">
+      <select id="scope" class="scope" aria-label="검색 범위">
+        <option value="all">전체검색</option>
+        <option value="law">법령명</option>
+        <option value="cert">자격명칭</option>
+        <option value="detail">상세내용</option>
+      </select>
+      <div class="search">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="q" type="search" placeholder="법령명, 자격명칭, 상세내용 검색을 통해 관심내용을 확인하세요!" aria-label="검색">
+      </div>
     </div>
   </div></div>
 
@@ -354,7 +379,6 @@ PAGE = r"""<!DOCTYPE html>
     출처: 국가법령정보센터 · 워크넷 &nbsp;|&nbsp; 생성일 @@BUILT_AT@@ &nbsp;|&nbsp; 한국산업인력공단 실증(PoC)
   </div></footer>
 
-  <!-- 팝업(모달) -->
   <div class="modal" id="modal" aria-hidden="true" role="dialog" aria-modal="true">
     <div class="modal-backdrop"></div>
     <div class="modal-panel">
@@ -366,22 +390,30 @@ PAGE = r"""<!DOCTYPE html>
 <script>
   var LAWS = @@LAWS_JSON@@;
 
-  // ── 검색 필터 ──
+  // ── 검색 (범위 드롭다운) ──
   var grid = document.getElementById('grid');
   var cards = Array.prototype.slice.call(grid.querySelectorAll('.card'));
   var q = document.getElementById('q');
+  var scope = document.getElementById('scope');
   var noresult = document.getElementById('noresult');
+  function hay(c) {
+    if (scope.value === 'law')    return c.dataset.qLaw;
+    if (scope.value === 'cert')   return c.dataset.qCert;
+    if (scope.value === 'detail') return c.dataset.qDetail;
+    return c.dataset.qAll;
+  }
   function applyFilter() {
     var term = (q.value || '').trim().toLowerCase();
     var shown = 0;
     cards.forEach(function(c) {
-      var on = !term || c.dataset.q.indexOf(term) !== -1;
+      var on = !term || (hay(c) || '').indexOf(term) !== -1;
       c.style.display = on ? '' : 'none';
       if (on) shown++;
     });
     noresult.style.display = shown ? 'none' : 'block';
   }
   q.addEventListener('input', applyFilter);
+  scope.addEventListener('change', applyFilter);
 
   // ── 팝업(모달) ──
   var modal = document.getElementById('modal');
