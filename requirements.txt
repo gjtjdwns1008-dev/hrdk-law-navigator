@@ -1,0 +1,5 @@
+# 운영 모드(구글시트 → HTML)에 필요한 최소 의존성
+gspread>=6.0
+
+# ── 아래는 로컬 미리보기(LOCAL_XLSX)에서만 필요. 깃허브 배포엔 불필요 ──
+# 미리보기 돌릴 때만 직접 설치:  pip install pandas openpyxl
