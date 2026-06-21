@@ -4,9 +4,11 @@
 # 서버 상시 운영 아님. 스케줄/수동으로 잠깐 켜졌다 꺼지는 배치.
 #
 # 사전 1회 설정 (깃허브 웹에서):
-#   1) Settings → Secrets and variables → Actions → 시크릿 2개 등록
-#        GCP_SA_JSON      : 서비스계정 JSON 전체 문자열 (monitor에 넣은 값과 동일)
-#        GOOGLE_SHEET_ID  : 모니터링 마스터 시트 KEY 또는 URL
+#   1) Settings → Secrets and variables → Actions → 시크릿 4개 등록
+#        GCP_SA_JSON      : monitor용 서비스계정 JSON 전체 문자열
+#        GOOGLE_SHEET_ID  : 활용도 모니터링(monitor) 마스터 시트 KEY 또는 URL
+#        RADAR_SA_JSON    : RADAR용 서비스계정 JSON 전체 문자열 (monitor와 다른 계정)
+#        RADAR_SHEET_ID   : 자격증 우대사항(RADAR) 시트 KEY 또는 URL
 #   2) Settings → Pages → Source = "GitHub Actions" 로 변경
 #   ※ 이 두 가지를 안 하면 워크플로우가 시트를 못 읽거나 배포가 실패함.
 # ───────────────────────────────────────────────────────────────
@@ -19,7 +21,7 @@ on:
   push:
     branches: [ main ]             # 코드 수정해서 push하면 자동 재배포
     paths:
-      - "site_builder.py"
+      - "build_site.py"
       - "requirements.txt"
       - ".github/workflows/build.yml"
 
@@ -49,15 +51,16 @@ jobs:
       - name: 의존성 설치
         run: pip install -r requirements.txt
 
-      - name: 사이트 생성 (시트 → dist/index.html)
+      - name: 사이트 생성 (시트 → dist/index.html, 탭 2개 통합)
         env:
           GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          RADAR_SA_JSON: ${{ secrets.RADAR_SA_JSON }}
+          RADAR_SHEET_ID: ${{ secrets.RADAR_SHEET_ID }}
           # 선택 옵션 (필요할 때만 주석 해제):
           # SOURCE_WORKSHEET: "연관 높은 법령"
-          # TARGET_MONTH: ""        # 비우면 데이터의 가장 최근 달 자동
-          # MAX_CARDS: "300"
-        run: python site_builder.py
+          # RADAR_WORKSHEET: "우대사항_대장"
+        run: python build_site.py
 
       - name: 결과물(dist) 업로드
         uses: actions/upload-pages-artifact@v3
