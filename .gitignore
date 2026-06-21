@@ -1,0 +1,13 @@
+# 빌드 결과물 (러너가 매번 새로 만들므로 깃허브에 안 올림)
+dist/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 로컬 비밀/데이터 (절대 깃허브에 올리지 말 것)
+.env
+gcp-key.json
+*.json
+!.github/**/*.json
+*.xlsx
