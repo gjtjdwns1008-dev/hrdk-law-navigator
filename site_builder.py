@@ -10,8 +10,9 @@ site_builder.py — 대국민 법령 네비게이터 정적 사이트 빌더
   결과 HTML을 GitHub Pages로 올리면 그게 곧 공개 웹사이트가 된다.
 
 [설계 원칙]
-  - 기존 코어(hrdk_law_core.sheets)의 인증/시트읽기를 그대로 재사용한다.
-  - 기존 배치 코드(main/brain/config)는 건드리지 않는다. 이 파일은 별도 모듈.
+  - 외부 레포 의존이 없다. 구글시트만 읽으면 되므로 시트 인증을 자체 포함한다.
+    (gspread 하나만 있으면 운영 모드가 돈다.)
+  - 기존 배치 코드(main/brain/config)는 건드리지 않는다. 이 파일은 별도 레포의 단독 모듈.
   - 데이터는 "자동으로 채워진다". 사람이 수기로 업로드하지 않는다.
 
 [두 가지 실행 모드]
@@ -33,6 +34,7 @@ site_builder.py — 대국민 법령 네비게이터 정적 사이트 빌더
 
 import os
 import re
+import json
 import html
 import datetime
 from urllib.parse import quote
@@ -92,11 +94,26 @@ def classify_field(cert_string: str) -> str:
 # ─────────────────────────────────────────────────────────────
 # 2. 데이터 로드 — 운영(시트) / 미리보기(xlsx) 두 모드 통합
 # ─────────────────────────────────────────────────────────────
+def _sheet_key(v: str) -> str:
+    """전체 URL을 넣어도 시트 KEY만 뽑아낸다(KEY를 그대로 넣어도 OK)."""
+    m = re.search(r"/d/([A-Za-z0-9_-]+)", str(v or ""))
+    return m.group(1) if m else str(v or "").strip()
+
+
+def _open_spreadsheet():
+    """서비스계정 JSON(문자열) + 시트 KEY로 스프레드시트를 연다. gspread만 의존."""
+    import gspread  # 운영 모드에서만 필요 (미리보기 모드는 불필요)
+    creds_dict = json.loads(os.environ["GCP_SA_JSON"].strip(), strict=False)
+    key = _sheet_key(os.environ["GOOGLE_SHEET_ID"])
+    gc = gspread.service_account_from_dict(creds_dict)
+    return gc.open_by_key(key)
+
+
 def load_rows():
     """행 목록(list[dict])을 반환. 두 모드 모두 같은 모양(헤더=키)으로 맞춘다."""
     local_xlsx = os.environ.get("LOCAL_XLSX", "").strip()
     if local_xlsx:
-        # ── 미리보기 모드: 로컬 xlsx ──
+        # ── 미리보기 모드: 로컬 xlsx (pandas/openpyxl 필요) ──
         import pandas as pd
         sheet = os.environ.get("LOCAL_SHEET", SOURCE_WORKSHEET)
         print(f"🖼  미리보기 모드: {local_xlsx} [{sheet}]")
@@ -104,14 +121,8 @@ def load_rows():
         df = df.fillna("")
         return df.to_dict("records")
 
-    # ── 운영 모드: 구글 시트 (코어 인증 재사용) ──
-    from hrdk_law_core.sheets import get_sheet_client
-    gcp = os.environ["GCP_SA_JSON"]
-    sheet_id = os.environ["GOOGLE_SHEET_ID"]
-    # get_sheet_client는 (client, spreadsheet) 튜플 반환 → 두 번째만 사용 (코어 규칙)
-    _, ss = get_sheet_client(gcp, sheet_id)
-    if ss is None:
-        raise SystemExit("❌ 시트 접속 실패 — GCP_SA_JSON / GOOGLE_SHEET_ID 확인")
+    # ── 운영 모드: 구글 시트 (자체 인증 — 외부 레포 의존 없음) ──
+    ss = _open_spreadsheet()
     print(f"📄 시트 읽기: [{SOURCE_WORKSHEET}]")
     return ss.worksheet(SOURCE_WORKSHEET).get_all_records()
 
