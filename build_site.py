@@ -177,13 +177,15 @@ def r_build(rows, detail_map):
 
 def r_card(d, i):
     badges = "".join(f'<span class="pf" style="--c:{PREF_COLOR.get(p,"#8A8F98")}">{esc(p)}</span>' for p in d["prefs"])
-    sjb = ' · <span class="sjb">⚠ 중대재해처벌법 관련</span>' if d["sjb"] else ""
+    sjb = '<span class="sjb-badge">⚠ 중대재해처벌법 관련</span>' if d["sjb"] else ""
     return f"""
     <article class="card rcard" data-i="{i}">
       <h3 class="cert"><button type="button" class="title-btn">{esc(d['cert'])}</button></h3>
       <div class="pfs">{badges}</div>
-      <div class="card-foot"><span class="lc">우대 법령 {d['law_count']}개{sjb}</span>
-        <button type="button" class="detail-link">우대 근거 상세 →</button></div>
+      <div class="card-foot">
+        <div class="foot-meta"><span class="lc">우대 법령 {d['law_count']}개</span>{sjb}</div>
+        <div class="foot-action"><button type="button" class="detail-link">우대 근거 상세 →</button></div>
+      </div>
     </article>"""
 
 
@@ -288,6 +290,10 @@ PAGE = r"""<!DOCTYPE html>
   .pfs{display:flex;flex-wrap:wrap;gap:6px;margin:13px 0 4px;}
   .pf{font-size:12px;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff);border-radius:999px;padding:3px 10px;}
   .lc{font-size:12.5px;color:var(--muted);} .sjb{color:#C0492F;font-weight:600;}
+  .rcard .card-foot{flex-direction:column;align-items:stretch;gap:9px;}
+  .foot-meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;}
+  .foot-action{display:flex;justify-content:flex-end;}
+  .sjb-badge{white-space:nowrap;font-size:11.5px;font-weight:600;color:#C0492F;background:#FBECEA;border:1px solid #F0D2CC;border-radius:6px;padding:2px 8px;}
   /* 모달 */
   .modal{position:fixed;inset:0;display:none;} .modal.open{display:block;}
   .modal-backdrop{position:absolute;inset:0;background:rgba(16,36,63,.45);}
@@ -365,7 +371,7 @@ PAGE = r"""<!DOCTYPE html>
   <main><div class="wrap"><div class="grid rgrid" id="grid-r">@@R_CARDS@@</div><p class="noresult" id="nores-r">해당 자격증이 없습니다.</p></div></main>
 </section>
 
-<footer><div class="wrap"><b>안내</b> · 이 페이지는 AI가 법령 원문을 분석하고 정리하였습니다. 정확한 법적 효력은 반드시 <a href="https://www.law.go.kr" target="_blank" rel="noopener" style="color:var(--accent)">국가법령정보센터</a> 원문을 확인하세요. 출처: 국가법령정보센터 · 워크넷 | 생성일 @@BUILT_AT@@ | 한국산업인력공단 실증(PoC)</div></footer>
+<footer><div class="wrap"><b>안내</b> · 이 페이지는 AI가 법령 원문을 분석하고 정리하였습니다. 정확한 법적 효력은 반드시 <a href="https://www.law.go.kr" target="_blank" rel="noopener" style="color:var(--accent)">국가법령정보센터</a> 원문을 확인하세요. 출처: 국가법령정보센터 | 생성일 @@BUILT_AT@@ | 한국산업인력공단 실증(PoC)</div></footer>
 
 <div class="modal" id="modal" aria-hidden="true" role="dialog" aria-modal="true"><div class="modal-backdrop"></div><div class="modal-panel"><button class="modal-close" aria-label="닫기">&times;</button><div id="m-body"></div></div></div>
 <div class="modal" id="modal2" aria-hidden="true" role="dialog" aria-modal="true"><div class="modal-backdrop"></div><div class="modal-panel"><button class="modal-close" aria-label="닫기">&times;</button><div id="m2-body"></div></div></div>
