@@ -30,7 +30,8 @@ MCOL = {"law":"법령명","ministry":"소관부처","date":"시행일자","kind"
         "certs":"법령 관련 국가기술자격 종목","article":"근거조문","link":"조문별 다이렉트 링크"}
 RCOL = {"law":"법령명","article":"근거조문","pref":"우대분류","certs":"관련 종목",
         "t1type":"Track1_취급유형","t1risk":"Track1_위험도","t2":"Track2_효용코드",
-        "sjb":"중처법대상","detail":"상세 분석 결과","rel":"연관성_판별"}
+        "sjb":"중처법대상","detail":"상세 분석 결과","rel":"연관성_판별",
+        "eff":"시행일자","reason":"검토사유"}
 PREF_ORDER = ["의무고용","직무권한부여","인사우대","시험면제","기타"]
 PREF_COLOR = {"의무고용":"#C0492F","직무권한부여":"#1F6FB2","인사우대":"#0F6E56","시험면제":"#5B4BB0","기타":"#8A8F98"}
 
@@ -70,6 +71,13 @@ def fmt_date(v):
     d = digits(v); return f"{d[:4]}.{d[4:6]}.{d[6:]}" if len(d) == 8 else str(v or "")
 def esc(v): return html.escape(str(v or "").strip())
 def law_url_name(name): return f"https://www.law.go.kr/법령/{quote(str(name or '').strip())}"
+
+def fmt_eff(s):
+    """시행일자 표기: '20220103' → '2022.01.03'. 형식 다르면 원문 그대로."""
+    d = re.sub(r"\D", "", str(s or ""))
+    if len(d) == 8:
+        return f"{d[:4]}.{d[4:6]}.{d[6:]}"
+    return str(s or "").strip()
 def tok(v): return str(v or "").split(" ")[0].strip()  # "B (영업요건형)" -> "B"
 
 
@@ -154,8 +162,12 @@ def r_build(rows):
              "p":str(r.get(RCOL["pref"]) or "").strip() or "기타",
              "t1":tok(r.get(RCOL["t1type"])), "t1r":tok(r.get(RCOL["t1risk"])), "t2":tok(r.get(RCOL["t2"])),
              "s":1 if sjb else 0}
-        det = str(r.get(RCOL["detail"]) or "").strip()   # 관련법령 탭의 상세 분석 결과(직접 보유)
+        eff = str(r.get(RCOL["eff"]) or "").strip()       # 시행일자(제·개정일) 표시용
+        if eff: e["e"] = fmt_eff(eff)
+        det = str(r.get(RCOL["detail"]) or "").strip()    # 관련법령 탭의 상세 분석 결과(직접 보유)
         if det: e["d"] = det
+        rsn = str(r.get(RCOL["reason"]) or "").strip()    # 검토사유(있을 때만 팝업에 노출)
+        if rsn: e["r"] = rsn
         ei = len(entries); entries.append(e)
         for c in certs: cert_map[c].append(ei)
     items = sorted(cert_map.items(), key=lambda kv: len({entries[ei]["law"] for ei in kv[1]}), reverse=True)[:R_MAX]
@@ -308,6 +320,9 @@ PAGE = r"""<!DOCTYPE html>
   .law-m{font-size:12.5px;color:var(--muted);margin-top:3px;}
   .tag-t2{font-size:11px;color:#3A4862;background:#EEF2F8;border:1px solid #DCE3EE;border-radius:5px;padding:1px 7px;}
   .tag-sjb{font-size:11px;color:#fff;background:#C0492F;border-radius:5px;padding:1px 7px;} .law-go{font-size:12px;color:var(--muted);margin-left:auto;}
+  .law-eff{display:inline-block;margin-left:8px;font-size:11px;color:#5B6B7B;background:#EEF2F6;border-radius:5px;padding:1px 7px;}
+  .note-sec{background:#FFF8E8;border:1px solid #F2D98A;border-radius:10px;padding:12px 14px;}
+  .note-sec h4{color:#8A5A00;margin:0 0 6px;}
   .m2-law{font-size:20px;font-weight:800;color:var(--ink);margin:0 30px 2px 0;} .m2-art{font-size:13px;color:var(--muted);}
   .trk{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#FAFBFD;}
   .trk .k{font-size:12px;font-weight:700;color:var(--navy);} .trk .v{font-size:14.5px;font-weight:700;color:var(--ink);margin-top:3px;}
@@ -436,7 +451,7 @@ function openCert(i){var d=RCERTS[i];if(!d)return;
   var laws=(d.idx||[]).map(function(ei){var l=RENTRIES[ei];var t2n=(T2[l.t2]||[l.t2])[0];var tags='';
     if(l.t2)tags+=' <span class="tag-t2">'+escq(l.t2+' '+t2n)+'</span>';
     if(l.s)tags+=' <span class="tag-sjb">중처법</span>';
-    return '<div class="law" data-ei="'+ei+'"><div class="law-h">'+pfBadge(l.p)+'<span class="law-name">'+escq(l.law)+'</span>'+tags+'<span class="law-go">상세 →</span></div><div class="law-m">'+escq(l.a)+'</div></div>';
+    return '<div class="law" data-ei="'+ei+'"><div class="law-h">'+pfBadge(l.p)+'<span class="law-name">'+escq(l.law)+'</span>'+tags+'<span class="law-go">상세 →</span></div><div class="law-m">'+escq(l.a)+(l.e?'<span class="law-eff">시행 '+escq(l.e)+'</span>':'')+'</div></div>';
   }).join('');
   mb.innerHTML='<h2 class="m-cert">'+escq(d.cert)+'</h2>'
     +'<div class="m-pfs">'+pfs+'</div><div class="m-sec"><h4>이 자격증을 우대하는 법령 ('+(d.idx||[]).length+'건)</h4>'+laws+'</div>';
@@ -444,8 +459,9 @@ function openCert(i){var d=RCERTS[i];if(!d)return;
 // radar 법령 상세(2차)
 function trkBlock(k,code,name,desc,sub){return '<div class="trk"><div class="k">'+k+'</div><div class="v">'+escq(code)+(name?' · '+escq(name):'')+(sub?' <span class="sub">('+escq(sub)+')</span>':'')+'</div>'+(desc?'<div class="d">'+escq(desc)+'</div>':'')+'</div>';}
 function openLaw(ei){var l=RENTRIES[ei];if(!l)return;
-  var h='<h2 class="m2-law">'+escq(l.law)+'</h2><div class="m2-art">'+escq(l.a)+'</div><div class="m-pfs" style="margin-top:12px;">'+pfBadge(l.p)+'</div>';
+  var h='<h2 class="m2-law">'+escq(l.law)+'</h2><div class="m2-art">'+escq(l.a)+(l.e?' · 시행 '+escq(l.e):'')+'</div><div class="m-pfs" style="margin-top:12px;">'+pfBadge(l.p)+'</div>';
   h+='<div class="m-sec"><h4>상세 분석 결과</h4>'+(l.d?'<p style="margin:0;font-size:14.5px;line-height:1.7;">'+escq(l.d)+'</p>':'<p style="margin:0;font-size:14px;color:var(--muted);">상세 분석 결과는 일일 분석(관련법령) 연동 시 표시됩니다.</p>')+'</div>';
+  if(l.r)h+='<div class="m-sec note-sec"><h4>📌 참고: 직접 확인이 필요한 내용</h4><p style="margin:0;font-size:13.5px;line-height:1.65;color:#8A5A00;">'+escq(l.r)+'</p></div>';
   var tt=T1TYPE[l.t1],tr=T1RISK[l.t1r];
   h+='<div class="m-sec"><h4>정책 관점 분류 (Track 1)</h4>';
   if(tt)h+=trkBlock('자격을 다루는 방식 · 취급유형',l.t1,tt[0],tt[1]);
