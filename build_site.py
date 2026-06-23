@@ -11,7 +11,7 @@ build_site.py — 자격증 법령 네비게이터 (통합 1파일 빌더)
 [실행]
   운영(기본):
     monitor → GCP_SA_JSON,  GOOGLE_SHEET_ID, SOURCE_WORKSHEET(기본 "연관 높은 법령")
-    radar   → RADAR_SA_JSON(없으면 GCP_SA_JSON 폴백), RADAR_SHEET_ID, RADAR_WORKSHEET(기본 "우대사항_대장")
+    radar   → RADAR_SA_JSON(없으면 GCP_SA_JSON 폴백), RADAR_SHEET_ID, RADAR_WORKSHEET(기본 "국가기술자격 관련법령")
   미리보기:
     monitor → LOCAL_XLSX,        LOCAL_SHEET
     radar   → LOCAL_XLSX_RADAR,  LOCAL_SHEET_RADAR
@@ -28,9 +28,9 @@ R_MAX = int(os.environ.get("R_MAX", "9999"))
 MCOL = {"law":"법령명","ministry":"소관부처","date":"시행일자","kind":"개정유형",
         "summary1":"활용도 분석 상세","summary2":"주요 제·개정내용",
         "certs":"법령 관련 국가기술자격 종목","article":"근거조문","link":"조문별 다이렉트 링크"}
-RCOL = {"law":"법령명","article":"조문","pref":"우대분류","certs":"해당 자격종목",
+RCOL = {"law":"법령명","article":"근거조문","pref":"우대분류","certs":"관련 종목",
         "t1type":"Track1_취급유형","t1risk":"Track1_위험도","t2":"Track2_효용코드",
-        "sjb":"중처법대상","note":"비고"}
+        "sjb":"중처법대상","detail":"상세 분석 결과","rel":"연관성_판별"}
 PREF_ORDER = ["의무고용","직무권한부여","인사우대","시험면제","기타"]
 PREF_COLOR = {"의무고용":"#C0492F","직무권한부여":"#1F6FB2","인사우대":"#0F6E56","시험면제":"#5B4BB0","기타":"#8A8F98"}
 
@@ -96,27 +96,16 @@ def _detail_map(rows):
     return m
 
 def load_radar():
-    """(우대사항_대장 행들, 상세분석 맵) 반환. 대장=뼈대, 관련법령=상세분석 보강."""
-    ws  = os.environ.get("RADAR_WORKSHEET", "우대사항_대장")
-    dws = os.environ.get("RADAR_DETAIL_WORKSHEET", "국가기술자격 관련법령")
+    """국가기술자격 관련법령 탭(단일 원장) 행들을 반환. (대장 경유 폐지)"""
+    ws = os.environ.get("RADAR_WORKSHEET", "국가기술자격 관련법령")
     lx = os.environ.get("LOCAL_XLSX_RADAR", "").strip()
     if lx:
         import pandas as pd
         sh = os.environ.get("LOCAL_SHEET_RADAR", ws)
-        led = pd.read_excel(lx, sheet_name=sh).fillna("").to_dict("records")
-        try:
-            det = pd.read_excel(lx, sheet_name=dws).fillna("").to_dict("records")
-        except Exception:
-            det = []
-        return led, _detail_map(det)
+        return pd.read_excel(lx, sheet_name=sh).fillna("").to_dict("records")
     raw = os.environ.get("RADAR_SA_JSON", "").strip() or os.environ["GCP_SA_JSON"].strip()
     ss = _client(raw).open_by_key(_sheet_key(os.environ["RADAR_SHEET_ID"]))
-    led = ss.worksheet(ws).get_all_records()
-    try:
-        det = ss.worksheet(dws).get_all_records()
-    except Exception:
-        det = []
-    return led, _detail_map(det)
+    return ss.worksheet(ws).get_all_records()
 
 
 # ───────── monitor 데이터/카드 ─────────
@@ -149,10 +138,14 @@ def m_card(d, i):
 # ───────── radar 데이터/카드 ─────────
 def r_pref_idx(p): return PREF_ORDER.index(p) if p in PREF_ORDER else len(PREF_ORDER)
 
-def r_build(rows, detail_map):
+def r_build(rows):
     entries = []                 # 고유 우대조항(법령·조문 단위)
     cert_map = defaultdict(list) # 자격증 -> entries 인덱스 참조
+    SKIP_REL = {"해당없음", "일반", ""}   # 공개 화면 제외 (연관높음/단순관련만 표시)
     for r in rows:
+        rel = str(r.get(RCOL["rel"]) or "").strip()
+        if rel in SKIP_REL:
+            continue
         certs = [c.strip() for c in re.split(r"[,/·\n]", str(r.get(RCOL["certs"]) or "")) if c.strip()]
         if not certs: continue
         law = str(r.get(RCOL["law"]) or "").strip()
@@ -161,7 +154,7 @@ def r_build(rows, detail_map):
              "p":str(r.get(RCOL["pref"]) or "").strip() or "기타",
              "t1":tok(r.get(RCOL["t1type"])), "t1r":tok(r.get(RCOL["t1risk"])), "t2":tok(r.get(RCOL["t2"])),
              "s":1 if sjb else 0}
-        det = detail_map.get(_nospace(law), "")   # 관련법령 탭의 상세 분석 결과
+        det = str(r.get(RCOL["detail"]) or "").strip()   # 관련법령 탭의 상세 분석 결과(직접 보유)
         if det: e["d"] = det
         ei = len(entries); entries.append(e)
         for c in certs: cert_map[c].append(ei)
@@ -203,8 +196,8 @@ def build():
     m_cards = "\n".join(m_card(d,i) for i,d in enumerate(mdata)) or '<p class="empty">표시할 법령이 없습니다.</p>'
 
     # radar
-    rrows, rdetail = load_radar()
-    rcerts, rentries, r_total = r_build(rrows, rdetail)
+    rrows = load_radar()
+    rcerts, rentries, r_total = r_build(rrows)
     r_cards = "\n".join(r_card(d,i) for i,d in enumerate(rcerts)) or '<p class="empty">자료가 없습니다.</p>'
 
     out = PAGE
