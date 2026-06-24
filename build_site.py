@@ -181,12 +181,10 @@ def r_build(rows):
     return certs_out, entries, len(cert_map)
 
 def r_card(d, i):
-    badges = "".join(f'<span class="pf" style="--c:{PREF_COLOR.get(p,"#8A8F98")}">{esc(p)}</span>' for p in d["prefs"])
     sjb = '<span class="sjb-badge">⚠ 중대재해처벌법 관련</span>' if d["sjb"] else ""
     return f"""
     <article class="card rcard" data-i="{i}">
       <h3 class="cert"><button type="button" class="title-btn">{esc(d['cert'])}</button></h3>
-      <div class="pfs">{badges}</div>
       <div class="card-foot">
         <div class="foot-meta"><span class="lc">우대 법령 {d['law_count']}개</span>{sjb}</div>
         <div class="foot-action"><button type="button" class="detail-link">우대 근거 상세 →</button></div>
@@ -299,6 +297,32 @@ PAGE = r"""<!DOCTYPE html>
   .foot-meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;}
   .foot-action{display:flex;justify-content:flex-end;}
   .sjb-badge{white-space:nowrap;font-size:11.5px;font-weight:600;color:#C0492F;background:#FBECEA;border:1px solid #F0D2CC;border-radius:6px;padding:2px 8px;}
+  /* 분류 안내 패널 */
+  .clsguide{margin:18px 0 4px;border:1px solid #E3E7EC;border-radius:12px;background:#fff;overflow:hidden;}
+  .clsguide summary{list-style:none;cursor:pointer;padding:14px 18px;font-size:14.5px;font-weight:700;color:var(--navy,#1F3864);display:flex;align-items:center;gap:8px;user-select:none;}
+  .clsguide summary::-webkit-details-marker{display:none;}
+  .cg-ic{font-size:16px;} .cg-sub{font-weight:500;color:#8A8F98;font-size:13px;}
+  .cg-arrow{margin-left:auto;color:#8A8F98;transition:transform .2s;}
+  .clsguide[open] .cg-arrow{transform:rotate(180deg);}
+  .cg-body{padding:4px 18px 18px;border-top:1px solid #EEF1F4;}
+  .cg-row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .cg-block{margin-top:16px;}
+  .cg-head{font-size:13.5px;font-weight:700;color:var(--navy,#1F3864);margin-bottom:7px;}
+  .cg-head span{font-weight:500;color:#8A8F98;font-size:12px;margin-left:4px;}
+  .cg-tbl{width:100%;border-collapse:collapse;font-size:12.8px;line-height:1.5;}
+  .cg-tbl th{background:#F4F6F9;color:#5B6B7B;font-weight:600;text-align:left;padding:6px 9px;border:1px solid #E6EAEF;white-space:nowrap;}
+  .cg-tbl td{padding:6px 9px;border:1px solid #EEF1F4;vertical-align:top;color:#3A4250;}
+  .cg-tbl b{color:#1F2937;}
+  .cg-tag{display:inline-block;font-size:11.5px;font-weight:700;color:#fff;background:var(--c,#8A8F98);border-radius:6px;padding:2px 9px;white-space:nowrap;}
+  .cg-code{display:inline-block;min-width:30px;text-align:center;font-size:11.5px;font-weight:700;color:var(--navy,#1F3864);background:#EEF2F7;border:1px solid #DCE3EB;border-radius:6px;padding:1px 7px;white-space:nowrap;}
+  .cg-code.dim{color:#9AA1AA;background:#F2F3F5;border-color:#E5E7EA;}
+  .cg-code.warn{color:#fff;background:#D98A2B;border-color:#C57A1F;}
+  .cg-code.danger{color:#fff;background:#C0492F;border-color:#A93E27;}
+  .cg-t2 .cg-area{font-weight:700;font-size:12.5px;color:#fff;background:var(--c,#8A8F98);text-align:center;white-space:nowrap;}
+  .cg-t2 .cg-area small{font-weight:500;opacity:.9;font-size:10.5px;}
+  .cg-t2 .cg-area.dim{background:#9AA1AA;}
+  .cg-note{margin:14px 0 0;font-size:11.5px;color:#9AA1AA;}
+  @media(max-width:720px){ .cg-row2{grid-template-columns:1fr;} .cg-sub{display:none;} .cg-tbl{font-size:12px;} }
   /* 모달 */
   .modal{position:fixed;inset:0;display:none;} .modal.open{display:block;}
   .modal-backdrop{position:absolute;inset:0;background:rgba(16,36,63,.45);}
@@ -371,6 +395,70 @@ PAGE = r"""<!DOCTYPE html>
     <h1>내 자격증, 어떤 법에서 우대받나요?</h1>
     <p class="lead">자격증을 고르면 그 자격으로 우대(의무고용·직무권한·인사우대·시험면제 등)받는 법령과 근거를 한눈에 봅니다.</p>
   </div></div>
+  <div class="wrap">
+    <details class="clsguide">
+      <summary><span class="cg-ic">📊</span> 분류 체계 안내 <span class="cg-sub">— 상세 화면의 분류 표기는 이렇게 읽어요</span><span class="cg-arrow">▾</span></summary>
+      <div class="cg-body">
+        <div class="cg-block">
+          <div class="cg-head">직능연 우대분류 <span>법령이 자격에 부여하는 우대의 성격</span></div>
+          <table class="cg-tbl">
+            <tr><th>분류</th><th>활용 유형</th></tr>
+            <tr><td><span class="cg-tag" style="--c:#1F6FB2">의무고용</span></td><td>사업체를 <b>등록·허가</b>하기 위해 자격 취득자를 고용(배치)해야 하는 경우. 조사·검사·검정·관리 업무의 민간 위탁 대상 기관 지정도 포함.</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#2E8B6F">직무권한부여</span></td><td>고용을 전제하지 않고 <b>자격자만 수행</b>할 수 있는 직무(확인·측정, 서류 작성·검토, 능력 산정, 업무 책임 등). 위원 위촉·선발·임명도 포함.</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#C28A2B">인사우대</span></td><td><b>채용</b>(임용 특전·시험과목 면제·점수 가산·경력경쟁채용·전직시험), <b>보수</b>(특수업무수당·노임단가 가산), <b>평정·승진</b>(가산점) 우대.</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#8A5AB0">시험면제</span></td><td>자격 <b>취득을 위한 시험(검정)에서의 면제</b>. (채용 관련 시험면제는 인사우대로 분류)</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#8A8F98">기타</span></td><td>직접적인 자격 우대에 해당하지 않는 경우.</td></tr>
+          </table>
+        </div>
+
+        <div class="cg-row2">
+          <div class="cg-block">
+            <div class="cg-head">정책 관점 · Track 1 <span>① 자격을 다루는 방식 (취급유형)</span></div>
+            <table class="cg-tbl">
+              <tr><th>코드</th><th>유형 · 정의</th></tr>
+              <tr><td><span class="cg-code">A</span></td><td><b>신분형성형</b> — 자격이 면허로 전환돼 평생 직업·신분 부여 (건설기계조종사, 이용사·미용사)</td></tr>
+              <tr><td><span class="cg-code">B</span></td><td><b>영업요건형</b> — 사업 등록·허가·지정 시 자격자 보유 의무 (건설업·측량업 등록)</td></tr>
+              <tr><td><span class="cg-code">C</span></td><td><b>직역독점형</b> — 특정 직무를 자격자만 수행(선임·배치·서명) (안전관리자, 환경기술인)</td></tr>
+              <tr><td><span class="cg-code">D</span></td><td><b>인사가산형</b> — 채용·승진·평정·보수 부가 우대 (공무원 가점, 노임 가산)</td></tr>
+              <tr><td><span class="cg-code">E</span></td><td><b>검정연계형</b> — 타 자격·시험의 응시자격·면제 연계 (시험 면제)</td></tr>
+              <tr><td><span class="cg-code dim">Z</span></td><td><b>제외</b> — 자격을 직접 다루지 않는 조항</td></tr>
+            </table>
+          </div>
+          <div class="cg-block">
+            <div class="cg-head">정책 관점 · Track 1 <span>② 경력이음 위험도 (모순 강도)</span></div>
+            <table class="cg-tbl">
+              <tr><th>코드</th><th>강도 · 정의</th></tr>
+              <tr><td><span class="cg-code">N</span></td><td><b>무관</b> — 자격이 직역 진입 조건 아님(부가우대만)</td></tr>
+              <tr><td><span class="cg-code">L</span></td><td><b>저위험</b> — 학력·경력·유사자격으로 우회 가능</td></tr>
+              <tr><td><span class="cg-code">M</span></td><td><b>중위험</b> — 복수 자격 중 택일로 대체 가능</td></tr>
+              <tr><td><span class="cg-code warn">H</span></td><td><b>고위험 ★</b> — 자격+경력 동시 요구(경력이음 도입 시 모순)</td></tr>
+              <tr><td><span class="cg-code danger">C</span></td><td><b>임계위험 ★★</b> — 단일 자격만 인정(대체 경로 없음)</td></tr>
+              <tr><td><span class="cg-code dim">X</span></td><td><b>해당없음</b> — 취급유형이 Z일 때 (Z↔X 짝)</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="cg-block">
+          <div class="cg-head">국민 취업 정보 관점 · Track 2 <span>구직자에게 주는 노동시장 효용 (11종)</span></div>
+          <table class="cg-tbl cg-t2">
+            <tr><th>영역</th><th>코드</th><th>세부유형 · 정의</th></tr>
+            <tr><td rowspan="2" class="cg-area" style="--c:#1F6FB2">Ⅰ 직업창출형<br><small>자격 자체가 직업</small></td><td><span class="cg-code">Ⅰ-1</span></td><td><b>면허전환형</b> — 자격→면허 발급으로 평생 직업·신분</td></tr>
+            <tr><td><span class="cg-code">Ⅰ-2</span></td><td><b>개업창업형</b> — 자격자가 단독 수행(확인·서명·진단) → 1인 사업 가능</td></tr>
+            <tr><td rowspan="5" class="cg-area" style="--c:#2E8B6F">Ⅱ 취업관문형<br><small>자격이 채용 요건</small></td><td><span class="cg-code">Ⅱ-1</span></td><td><b>등록필수형</b> — 사업체 등록·허가 시 자격자 보유 의무</td></tr>
+            <tr><td><span class="cg-code">Ⅱ-2</span></td><td><b>지정인력형</b> — 지정·위탁·대행 기관 인력 요건(검사·인증)</td></tr>
+            <tr><td><span class="cg-code">Ⅱ-3</span></td><td><b>전속배치형</b> — 단일 자격자만 선임(대체 불가, 매우 드묾)</td></tr>
+            <tr><td><span class="cg-code">Ⅱ-4</span></td><td><b>선택배치형</b> — 복수 자격 중 택일 선임(안전관리자 등)</td></tr>
+            <tr><td><span class="cg-code">Ⅱ-5</span></td><td><b>현장배치형</b> — 공사·사업장 규모별 배치 의무</td></tr>
+            <tr><td rowspan="3" class="cg-area" style="--c:#C28A2B">Ⅲ 부가우대형<br><small>입직 후 효용</small></td><td><span class="cg-code">Ⅲ-1</span></td><td><b>시험면제</b> — 다른 자격·임용시험 과목 면제</td></tr>
+            <tr><td><span class="cg-code">Ⅲ-2</span></td><td><b>인사</b> — 채용·보수·평정·승진 우대(가산점 등)</td></tr>
+            <tr><td><span class="cg-code">Ⅲ-3</span></td><td><b>위촉·자문</b> — 위원·심의위원 등 자문성 위촉</td></tr>
+            <tr><td class="cg-area dim">Ⅳ 제외</td><td><span class="cg-code dim">Ⅳ-0</span></td><td><b>제외</b> — 중복·삭제·이관·정의 조항 등</td></tr>
+          </table>
+        </div>
+        <p class="cg-note">출처: 한국직업능력연구원 2022.1.3. 검토안 기준 재분류 (168개 법률 / 383개 조항)</p>
+      </div>
+    </details>
+  </div>
   <div class="toolbar"><div class="wrap"><div class="trow">
     <div class="search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="qr" type="search" placeholder="자격증 이름으로 검색 (예: 전기기사)" aria-label="검색"></div>
