@@ -321,7 +321,8 @@ PAGE = r"""<!DOCTYPE html>
   .cg-t2 .cg-area{font-weight:700;font-size:12.5px;color:#fff;background:var(--c,#8A8F98);text-align:center;white-space:nowrap;}
   .cg-t2 .cg-area small{font-weight:500;opacity:.9;font-size:10.5px;}
   .cg-t2 .cg-area.dim{background:#9AA1AA;}
-  .cg-note{margin:14px 0 0;font-size:11.5px;color:#9AA1AA;}
+  .cg-note{margin:14px 0 0;font-size:11.5px;color:#9AA1AA;line-height:1.7;}
+  .cg-note b{color:#5B6B7B;}
   @media(max-width:720px){ .cg-row2{grid-template-columns:1fr;} .cg-sub{display:none;} .cg-tbl{font-size:12px;} }
   /* 모달 */
   .modal{position:fixed;inset:0;display:none;} .modal.open{display:block;}
@@ -400,13 +401,13 @@ PAGE = r"""<!DOCTYPE html>
       <summary><span class="cg-ic">📊</span> 분류 체계 안내 <span class="cg-sub">— 상세 화면의 분류 표기는 이렇게 읽어요</span><span class="cg-arrow">▾</span></summary>
       <div class="cg-body">
         <div class="cg-block">
-          <div class="cg-head">직능연 우대분류 <span>법령이 자격에 부여하는 우대의 성격</span></div>
+          <div class="cg-head">우대분류 <span>법령이 자격에 부여하는 우대의 성격</span></div>
           <table class="cg-tbl">
             <tr><th>분류</th><th>활용 유형</th></tr>
-            <tr><td><span class="cg-tag" style="--c:#1F6FB2">의무고용</span></td><td>사업체를 <b>등록·허가</b>하기 위해 자격 취득자를 고용(배치)해야 하는 경우. 조사·검사·검정·관리 업무의 민간 위탁 대상 기관 지정도 포함.</td></tr>
-            <tr><td><span class="cg-tag" style="--c:#2E8B6F">직무권한부여</span></td><td>고용을 전제하지 않고 <b>자격자만 수행</b>할 수 있는 직무(확인·측정, 서류 작성·검토, 능력 산정, 업무 책임 등). 위원 위촉·선발·임명도 포함.</td></tr>
-            <tr><td><span class="cg-tag" style="--c:#C28A2B">인사우대</span></td><td><b>채용</b>(임용 특전·시험과목 면제·점수 가산·경력경쟁채용·전직시험), <b>보수</b>(특수업무수당·노임단가 가산), <b>평정·승진</b>(가산점) 우대.</td></tr>
-            <tr><td><span class="cg-tag" style="--c:#8A5AB0">시험면제</span></td><td>자격 <b>취득을 위한 시험(검정)에서의 면제</b>. (채용 관련 시험면제는 인사우대로 분류)</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#C0492F">의무고용</span></td><td>사업체를 <b>등록·허가</b>하기 위해 자격 취득자를 고용(배치)해야 하는 경우. 조사·검사·검정·관리 업무의 민간 위탁 대상 기관 지정도 포함.</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#1F6FB2">직무권한부여</span></td><td>고용을 전제하지 않고 <b>자격자만 수행</b>할 수 있는 직무(확인·측정, 서류 작성·검토, 능력 산정, 업무 책임 등). 위원 위촉·선발·임명도 포함.</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#0F6E56">인사우대</span></td><td><b>채용</b>(임용 특전·시험과목 면제·점수 가산·경력경쟁채용·전직시험), <b>보수</b>(특수업무수당·노임단가 가산), <b>평정·승진</b>(가산점) 우대.</td></tr>
+            <tr><td><span class="cg-tag" style="--c:#5B4BB0">시험면제</span></td><td>자격 <b>취득을 위한 시험(검정)에서의 면제</b>. (채용 관련 시험면제는 인사우대로 분류)</td></tr>
             <tr><td><span class="cg-tag" style="--c:#8A8F98">기타</span></td><td>직접적인 자격 우대에 해당하지 않는 경우.</td></tr>
           </table>
         </div>
@@ -455,7 +456,11 @@ PAGE = r"""<!DOCTYPE html>
             <tr><td class="cg-area dim">Ⅳ 제외</td><td><span class="cg-code dim">Ⅳ-0</span></td><td><b>제외</b> — 중복·삭제·이관·정의 조항 등</td></tr>
           </table>
         </div>
-        <p class="cg-note">출처: 한국직업능력연구원 2022.1.3. 검토안 기준 재분류 (168개 법률 / 383개 조항)</p>
+        <p class="cg-note">
+          <b>출처</b><br>
+          · <b>우대분류</b> — 한국직업능력연구원 「국가기술자격 우대 법령 검토안」(2022.1.3. 기준, 168개 법률 / 383개 조항)<br>
+          · <b>정책 관점(Track 1) · 국민 취업 정보 관점(Track 2)</b> — 위 검토안을 토대로 AI 분석을 통해 재구성한 매트릭스 분류 체계 (한국산업인력공단 자격품질관리국 자격품질기획부 검토)
+        </p>
       </div>
     </details>
   </div>
@@ -518,7 +523,7 @@ qr.addEventListener('input',filterR);filterR();
 var modal=document.getElementById('modal'),mb=document.getElementById('m-body');
 var modal2=document.getElementById('modal2'),mb2=document.getElementById('m2-body');
 function sec(t,inner){return inner?'<div class="m-sec"><h4>'+t+'</h4>'+inner+'</div>':'';}
-function openM(modalEl){modalEl.classList.add('open');modalEl.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';}
+function openM(modalEl){modalEl.classList.add('open');modalEl.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';var p=modalEl.querySelector('.modal-panel');if(p)p.scrollTop=0;}
 function closeModal(){modal.classList.remove('open');modal.setAttribute('aria-hidden','true');if(!modal2.classList.contains('open'))document.body.style.overflow='';}
 function closeModal2(){modal2.classList.remove('open');modal2.setAttribute('aria-hidden','true');}
 
