@@ -35,6 +35,11 @@ RCOL = {"law":"법령명","article":"근거조문","pref":"우대분류","certs"
 PREF_ORDER = ["의무고용","직무권한부여","인사우대","시험면제","기타"]
 PREF_COLOR = {"의무고용":"#C0492F","직무권한부여":"#1F6FB2","인사우대":"#0F6E56","시험면제":"#5B4BB0","기타":"#8A8F98"}
 
+def py_pref_badge(p):
+    """파이썬 측 우대분류 뱃지 HTML (JS의 pfBadge와 동일 모양)."""
+    p = str(p or "기타").strip() or "기타"
+    return f'<span class="pf" style="--c:{PREF_COLOR.get(p,"#8A8F98")}">{esc(p)}</span>'
+
 TRACK1_TYPE = {
  "A":["신분형성형","자격 취득이 행정청 면허로 이어져 평생 직업·신분을 부여하는 유형."],
  "B":["영업요건형","사업 등록·허가·지정 시 자격자 보유가 의무인 유형."],
@@ -251,7 +256,7 @@ def build():
     # 종목 미상 우대법령 섹션 (자격증 그리드 맨 아래 접이식)
     if nocert:
         rows_html = "".join(
-            '<div class="nc-item"><div class="nc-h">'+pfBadge(x["p"])+'<span class="nc-law">'+esc(x["law"])+'</span>'
+            '<div class="nc-item"><div class="nc-h">'+py_pref_badge(x["p"])+'<span class="nc-law">'+esc(x["law"])+'</span>'
             + ('<span class="law-eff">시행 '+esc(x["e"])+'</span>' if x["e"] else '')
             + '</div>'
             + ('<div class="nc-art">'+esc(x["a"])+'</div>' if x["a"] else '')
