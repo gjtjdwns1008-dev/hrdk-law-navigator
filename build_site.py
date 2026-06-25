@@ -31,7 +31,7 @@ MCOL = {"law":"법령명","ministry":"소관부처","date":"시행일자","kind"
 RCOL = {"law":"법령명","article":"근거조문","pref":"우대분류","certs":"관련 종목",
         "t1type":"Track1_취급유형","t1risk":"Track1_위험도","t2":"Track2_효용코드",
         "sjb":"중처법대상","detail":"상세 분석 결과","rel":"연관성_판별",
-        "eff":"시행일자","reason":"검토사유"}
+        "eff":"시행일자","reason":"검토사유","links":"조문별 다이렉트 링크"}
 PREF_ORDER = ["의무고용","직무권한부여","인사우대","시험면제","기타"]
 PREF_COLOR = {"의무고용":"#C0492F","직무권한부여":"#1F6FB2","인사우대":"#0F6E56","시험면제":"#5B4BB0","기타":"#8A8F98"}
 
@@ -78,6 +78,24 @@ def fmt_eff(s):
     if len(d) == 8:
         return f"{d[:4]}.{d[4:6]}.{d[6:]}"
     return str(s or "").strip()
+
+def parse_links(raw):
+    """'▶ 법령명 제71조\\nhttps://...\\n▶ ...\\nhttps://...' → [{'t':제목,'u':url}].
+    제목 줄(▶) 다음에 오는 http(s) 줄을 짝지어 묶는다."""
+    s = str(raw or "").strip()
+    if not s:
+        return []
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    out, pend = [], None
+    for ln in lines:
+        if ln.startswith("http"):
+            label = pend or "법령 원문"
+            out.append({"t": re.sub(r"^▶\s*", "", label), "u": ln})
+            pend = None
+        else:
+            pend = ln
+    # 제목 없이 URL만 있거나, ▶만 있고 URL 없는 경우도 안전 처리
+    return out
 def tok(v): return str(v or "").split(" ")[0].strip()  # "B (영업요건형)" -> "B"
 
 
@@ -149,15 +167,29 @@ def r_pref_idx(p): return PREF_ORDER.index(p) if p in PREF_ORDER else len(PREF_O
 def r_build(rows):
     entries = []                 # 고유 우대조항(법령·조문 단위)
     cert_map = defaultdict(list) # 자격증 -> entries 인덱스 참조
+    nocert = []                  # 종목 미상(우대는 있으나 종목 특정 불가) 목록
     SKIP_REL = {"해당없음", "일반", ""}   # 공개 화면 제외 (연관높음/단순관련만 표시)
     for r in rows:
         rel = str(r.get(RCOL["rel"]) or "").strip()
         if rel in SKIP_REL:
             continue
-        certs = [c.strip() for c in re.split(r"[,/·\n]", str(r.get(RCOL["certs"]) or "")) if c.strip()]
-        if not certs: continue
+        # 종목 분리: 괄호 안 쉼표는 보호('소방설비기사(기계분야)'가 안 깨지게)
+        craw = str(r.get(RCOL["certs"]) or "")
+        craw = re.sub(r"\(([^)]*)\)", lambda m: "("+m.group(1).replace(",","§")+")", craw)
+        certs = [c.strip().replace("§",",") for c in re.split(r"[,/·\n]", craw) if c.strip()]
         law = str(r.get(RCOL["law"]) or "").strip()
         sjb = str(r.get(RCOL["sjb"]) or "").strip() not in ("","비대상","해당없음")
+        if not certs:
+            # 종목 미상: 우대는 있으나 종목을 특정 못한 법령 → 별도 섹션용으로 수집
+            nocert.append({
+                "law": law,
+                "p": str(r.get(RCOL["pref"]) or "").strip() or "기타",
+                "a": str(r.get(RCOL["article"]) or "").strip(),
+                "e": fmt_eff(str(r.get(RCOL["eff"]) or "").strip()),
+                "r": str(r.get(RCOL["reason"]) or "").strip(),
+                "u": law_url_name(law),
+            })
+            continue
         e = {"law":law, "a":str(r.get(RCOL["article"]) or "").strip(),
              "p":str(r.get(RCOL["pref"]) or "").strip() or "기타",
              "t1":tok(r.get(RCOL["t1type"])), "t1r":tok(r.get(RCOL["t1risk"])), "t2":tok(r.get(RCOL["t2"])),
@@ -168,6 +200,8 @@ def r_build(rows):
         if det: e["d"] = det
         rsn = str(r.get(RCOL["reason"]) or "").strip()    # 검토사유(있을 때만 팝업에 노출)
         if rsn: e["r"] = rsn
+        lk = parse_links(r.get(RCOL["links"]))             # 조문별 다이렉트 링크 [{t,u}]
+        if lk: e["lk"] = lk
         ei = len(entries); entries.append(e)
         for c in certs: cert_map[c].append(ei)
     items = sorted(cert_map.items(), key=lambda kv: len({entries[ei]["law"] for ei in kv[1]}), reverse=True)[:R_MAX]
@@ -178,7 +212,12 @@ def r_build(rows):
         certs_out.append({"cert":cert, "prefs":prefs,
                           "law_count":len({entries[ei]["law"] for ei in idxs}),
                           "sjb":any(entries[ei]["s"] for ei in idxs), "idx":idxs_sorted})
-    return certs_out, entries, len(cert_map)
+    # 종목 미상: 법령명 기준 중복 제거(여러 조문이 같은 법령이면 하나로)
+    seen_nc, nocert_uniq = set(), []
+    for x in sorted(nocert, key=lambda z: z["law"]):
+        if x["law"] in seen_nc: continue
+        seen_nc.add(x["law"]); nocert_uniq.append(x)
+    return certs_out, entries, len(cert_map), nocert_uniq
 
 def r_card(d, i):
     sjb = '<span class="sjb-badge">⚠ 중대재해처벌법 관련</span>' if d["sjb"] else ""
@@ -207,14 +246,33 @@ def build():
 
     # radar
     rrows = load_radar()
-    rcerts, rentries, r_total = r_build(rrows)
+    rcerts, rentries, r_total, nocert = r_build(rrows)
     r_cards = "\n".join(r_card(d,i) for i,d in enumerate(rcerts)) or '<p class="empty">자료가 없습니다.</p>'
+    # 종목 미상 우대법령 섹션 (자격증 그리드 맨 아래 접이식)
+    if nocert:
+        rows_html = "".join(
+            '<div class="nc-item"><div class="nc-h">'+pfBadge(x["p"])+'<span class="nc-law">'+esc(x["law"])+'</span>'
+            + ('<span class="law-eff">시행 '+esc(x["e"])+'</span>' if x["e"] else '')
+            + '</div>'
+            + ('<div class="nc-art">'+esc(x["a"])+'</div>' if x["a"] else '')
+            + ('<div class="nc-r">📌 '+esc(x["r"])+'</div>' if x["r"] else '')
+            + '<a class="nc-ext" href="'+esc(x["u"])+'" target="_blank" rel="noopener">법제처에서 원문 확인 →</a></div>'
+            for x in nocert)
+        nocert_html = (
+            '<details class="nocert"><summary><span class="nc-ic">🔎</span> 종목 미상 우대법령 '
+            '<span class="nc-cnt">'+str(len(nocert))+'건</span><span class="cg-arrow">▾</span></summary>'
+            '<div class="nc-body"><p class="nc-desc">아래 법령은 국가기술자격 취득자에 대한 <b>우대 조항은 확인되었으나</b>, '
+            '구체적인 자격 종목이 별표·하위 규정·채용공고 등에 위임되어 있어 <b>개별 종목을 특정하지 못한</b> 경우입니다. '
+            '실제 적용 종목은 각 법령 원문(특히 별표)을 직접 확인해 주세요.</p>'
+            + rows_html + '</div></details>')
+    else:
+        nocert_html = ""
 
     out = PAGE
     repl = {
       "@@M_OPTS@@":m_opts, "@@M_DEF_FROM@@":def_from, "@@M_DEF_TO@@":def_to,
       "@@M_TOTAL_CERTS@@":str(m_total_certs), "@@M_CARDS@@":m_cards,
-      "@@R_CARDS@@":r_cards, "@@R_TOTAL@@":str(r_total),
+      "@@R_CARDS@@":r_cards, "@@R_TOTAL@@":str(r_total), "@@NOCERT@@":nocert_html,
       "@@BUILT_AT@@":datetime.datetime.now().strftime("%Y.%m.%d"),
       "@@MLAWS@@":json.dumps(mdata, ensure_ascii=False).replace("</","<\\/"),
       "@@RCERTS@@":json.dumps(rcerts, ensure_ascii=False).replace("</","<\\/"),
@@ -348,6 +406,26 @@ PAGE = r"""<!DOCTYPE html>
   .law-eff{display:inline-block;margin-left:8px;font-size:11px;color:#5B6B7B;background:#EEF2F6;border-radius:5px;padding:1px 7px;}
   .note-sec{background:#FFF8E8;border:1px solid #F2D98A;border-radius:10px;padding:12px 14px;}
   .note-sec h4{color:#8A5A00;margin:0 0 6px;}
+  .artlinks{display:flex;flex-wrap:wrap;gap:8px;}
+  .artlink{display:inline-block;font-size:12.5px;font-weight:600;color:#1F6FB2;background:#EEF5FC;border:1px solid #CFE2F3;border-radius:8px;padding:6px 11px;text-decoration:none;}
+  .artlink:hover{background:#DCEBF8;}
+  /* 종목 미상 우대법령 섹션 */
+  .nocert{margin:24px 0 8px;border:1px solid #E3E7EC;border-radius:12px;background:#fff;overflow:hidden;}
+  .nocert summary{list-style:none;cursor:pointer;padding:14px 18px;font-size:14.5px;font-weight:700;color:var(--navy,#1F3864);display:flex;align-items:center;gap:8px;}
+  .nocert summary::-webkit-details-marker{display:none;}
+  .nc-ic{font-size:16px;} .nc-cnt{font-size:12.5px;font-weight:600;color:#fff;background:#8A8F98;border-radius:10px;padding:1px 9px;}
+  .nocert summary .cg-arrow{margin-left:auto;color:#8A8F98;transition:transform .2s;}
+  .nocert[open] summary .cg-arrow{transform:rotate(180deg);}
+  .nc-body{padding:6px 18px 18px;border-top:1px solid #EEF1F4;}
+  .nc-desc{font-size:13px;line-height:1.65;color:#5B6B7B;background:#F7F9FB;border-radius:8px;padding:11px 13px;margin:12px 0 14px;}
+  .nc-item{padding:12px 0;border-bottom:1px solid #F0F2F5;}
+  .nc-item:last-child{border-bottom:none;}
+  .nc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .nc-law{font-size:14px;font-weight:700;color:#1F2937;}
+  .nc-art{font-size:12.5px;color:#5B6B7B;margin-top:4px;}
+  .nc-r{font-size:12.5px;color:#8A5A00;background:#FFF8E8;border:1px solid #F2D98A;border-radius:7px;padding:7px 10px;margin-top:7px;line-height:1.55;}
+  .nc-ext{display:inline-block;margin-top:8px;font-size:12.5px;font-weight:600;color:#1F6FB2;text-decoration:none;}
+  .nc-ext:hover{text-decoration:underline;}
   .m2-law{font-size:20px;font-weight:800;color:var(--ink);margin:0 30px 2px 0;} .m2-art{font-size:13px;color:var(--muted);}
   .trk{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#FAFBFD;}
   .trk .k{font-size:12px;font-weight:700;color:var(--navy);} .trk .v{font-size:14.5px;font-weight:700;color:var(--ink);margin-top:3px;}
@@ -397,7 +475,7 @@ PAGE = r"""<!DOCTYPE html>
     <p class="lead">자격증을 고르면 그 자격으로 우대(의무고용·직무권한·인사우대·시험면제 등)받는 법령과 근거를 한눈에 봅니다.</p>
   </div></div>
   <div class="wrap">
-    <details class="clsguide">
+    <details class="clsguide" open>
       <summary><span class="cg-ic">📊</span> 분류 체계 안내 <span class="cg-sub">— 상세 화면의 분류 표기는 이렇게 읽어요</span><span class="cg-arrow">▾</span></summary>
       <div class="cg-body">
         <div class="cg-block">
@@ -469,7 +547,7 @@ PAGE = r"""<!DOCTYPE html>
       <input id="qr" type="search" placeholder="자격증 이름으로 검색 (예: 전기기사)" aria-label="검색"></div>
     <span class="count">자격증 <b id="cntr">0</b>개</span>
   </div></div></div>
-  <main><div class="wrap"><div class="grid rgrid" id="grid-r">@@R_CARDS@@</div><p class="noresult" id="nores-r">해당 자격증이 없습니다.</p></div></main>
+  <main><div class="wrap"><div class="grid rgrid" id="grid-r">@@R_CARDS@@</div><p class="noresult" id="nores-r">해당 자격증이 없습니다.</p>@@NOCERT@@</div></main>
 </section>
 
 <footer><div class="wrap"><b>안내</b> · 이 페이지는 AI가 법령 원문을 분석하고 정리하였습니다. 정확한 법적 효력은 반드시 <a href="https://www.law.go.kr" target="_blank" rel="noopener" style="color:var(--accent)">국가법령정보센터</a> 원문을 확인하세요. 출처: 국가법령정보센터 | 생성일 @@BUILT_AT@@ | 한국산업인력공단 실증(PoC)</div></footer>
@@ -562,6 +640,9 @@ function openLaw(ei){var l=RENTRIES[ei];if(!l)return;
   if(!tt&&!tr)h+='<p class="law-m">분류 정보 없음</p>';h+='</div>';
   var t2=T2[l.t2];h+='<div class="m-sec"><h4>국민 취업정보 관점 분류 (Track 2)</h4>';
   if(t2)h+=trkBlock('노동시장 효용 · 효용코드',l.t2,t2[0],t2[2],t2[1]);else h+='<p class="law-m">분류 정보 없음</p>';h+='</div>';
+  if(l.lk&&l.lk.length){h+='<div class="m-sec"><h4>조문별 원문 바로가기</h4><div class="artlinks">';
+    for(var k=0;k<l.lk.length;k++){h+='<a class="artlink" href="'+escq(l.lk[k].u)+'" target="_blank" rel="noopener">'+escq(l.lk[k].t)+' →</a>';}
+    h+='</div></div>';}
   h+='<a class="m2-ext" href="'+escq(lawUrl(l.law))+'" target="_blank" rel="noopener">법제처에서 원문 보기 →</a>';
   mb2.innerHTML=h;openM(modal2);}
 
