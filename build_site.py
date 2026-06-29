@@ -77,6 +77,22 @@ def fmt_date(v):
 def esc(v): return html.escape(str(v or "").strip())
 def law_url_name(name): return f"https://www.law.go.kr/법령/{quote(str(name or '').strip())}"
 
+# 사전에 '·'(가운뎃점)가 포함된 정식 종목명 (분리 시 보호해야 함)
+DOT_CERTS = ["항공전기·전자정비기능사"]
+
+def split_certs(raw):
+    """관련 종목 문자열 분리. 괄호 안 쉼표 + 사전의 가운뎃점 종목명을 보호한 뒤
+    쉼표/슬래시/가운뎃점/줄바꿈으로 분리한다."""
+    s = str(raw or "")
+    # 1) 사전의 '·' 종목명 보호 (가운뎃점을 임시기호로)
+    for dc in DOT_CERTS:
+        s = s.replace(dc, dc.replace("·", "㉿"))
+    # 2) 괄호 안 쉼표 보호
+    s = re.sub(r"\(([^)]*)\)", lambda m: "(" + m.group(1).replace(",", "§") + ")", s)
+    # 3) 분리 후 복원
+    parts = [c.strip().replace("§", ",").replace("㉿", "·") for c in re.split(r"[,/·\n]", s) if c.strip()]
+    return parts
+
 def fmt_eff(s):
     """시행일자 표기: '20220103' → '2022.01.03'. 형식 다르면 원문 그대로."""
     d = re.sub(r"\D", "", str(s or ""))
@@ -141,7 +157,7 @@ def load_radar():
 
 # ───────── monitor 데이터/카드 ─────────
 def m_fields(row):
-    certs = [c.strip() for c in re.split(r"[,/·\n]", str(row.get(MCOL["certs"]) or "")) if c.strip()]
+    certs = split_certs(row.get(MCOL["certs"]))
     arts = [a.strip() for a in re.split(r"[,\n;·]", str(row.get(MCOL["article"]) or "")) if a.strip()]
     mn = str(row.get(MCOL["ministry"]) or "").strip(); kd = str(row.get(MCOL["kind"]) or "").strip()
     dt = fmt_date(row.get(MCOL["date"]))
@@ -179,9 +195,7 @@ def r_build(rows):
         if rel in SKIP_REL:
             continue
         # 종목 분리: 괄호 안 쉼표는 보호('소방설비기사(기계분야)'가 안 깨지게)
-        craw = str(r.get(RCOL["certs"]) or "")
-        craw = re.sub(r"\(([^)]*)\)", lambda m: "("+m.group(1).replace(",","§")+")", craw)
-        certs = [c.strip().replace("§",",") for c in re.split(r"[,/·\n]", craw) if c.strip()]
+        certs = split_certs(r.get(RCOL["certs"]))
         law = str(r.get(RCOL["law"]) or "").strip()
         sjb = str(r.get(RCOL["sjb"]) or "").strip() not in ("","비대상","해당없음")
         if not certs:
@@ -255,29 +269,23 @@ def build():
     r_cards = "\n".join(r_card(d,i) for i,d in enumerate(rcerts)) or '<p class="empty">자료가 없습니다.</p>'
     # 종목 미상 우대법령 섹션 (자격증 그리드 맨 아래 접이식)
     if nocert:
-        rows_html = "".join(
-            '<div class="nc-item"><div class="nc-h">'+py_pref_badge(x["p"])+'<span class="nc-law">'+esc(x["law"])+'</span>'
-            + ('<span class="law-eff">시행 '+esc(x["e"])+'</span>' if x["e"] else '')
-            + '</div>'
-            + ('<div class="nc-art">'+esc(x["a"])+'</div>' if x["a"] else '')
-            + ('<div class="nc-r">📌 '+esc(x["r"])+'</div>' if x["r"] else '')
-            + '<a class="nc-ext" href="'+esc(x["u"])+'" target="_blank" rel="noopener">법제처에서 원문 확인 →</a></div>'
-            for x in nocert)
-        nocert_html = (
-            '<details class="nocert"><summary><span class="nc-ic">🔎</span> 종목 미상 우대법령 '
-            '<span class="nc-cnt">'+str(len(nocert))+'건</span><span class="cg-arrow">▾</span></summary>'
-            '<div class="nc-body"><p class="nc-desc">아래 법령은 국가기술자격 취득자에 대한 <b>우대 조항은 확인되었으나</b>, '
-            '구체적인 자격 종목이 별표·하위 규정·채용공고 등에 위임되어 있어 <b>개별 종목을 특정하지 못한</b> 경우입니다. '
-            '실제 적용 종목은 각 법령 원문(특히 별표)을 직접 확인해 주세요.</p>'
-            + rows_html + '</div></details>')
+        nocert_banner = (
+            '<button type="button" class="nocert-banner" id="nocert-open">'
+            '<span class="nc-ic">🔎</span>'
+            '<span class="nc-btxt"><b>종목 미상 우대법령</b> '
+            '<span class="nc-cnt">' + str(len(nocert)) + '건</span></span>'
+            '<span class="nc-bsub">우대는 있으나 종목 특정이 어려운 법령 · 눌러서 보기 →</span>'
+            '</button>')
+        nocert_json = json.dumps(nocert, ensure_ascii=False).replace("</", "<\\/")
     else:
-        nocert_html = ""
+        nocert_banner = ""
+        nocert_json = "[]"
 
     out = PAGE
     repl = {
       "@@M_OPTS@@":m_opts, "@@M_DEF_FROM@@":def_from, "@@M_DEF_TO@@":def_to,
       "@@M_TOTAL_CERTS@@":str(m_total_certs), "@@M_CARDS@@":m_cards,
-      "@@R_CARDS@@":r_cards, "@@R_TOTAL@@":str(r_total), "@@NOCERT@@":nocert_html,
+      "@@R_CARDS@@":r_cards, "@@R_TOTAL@@":str(r_total), "@@NOCERT@@":nocert_banner, "@@NOCERT_JSON@@":nocert_json,
       "@@BUILT_AT@@":datetime.datetime.now().strftime("%Y.%m.%d"),
       "@@MLAWS@@":json.dumps(mdata, ensure_ascii=False).replace("</","<\\/"),
       "@@RCERTS@@":json.dumps(rcerts, ensure_ascii=False).replace("</","<\\/"),
@@ -414,15 +422,16 @@ PAGE = r"""<!DOCTYPE html>
   .artlinks{display:flex;flex-wrap:wrap;gap:8px;}
   .artlink{display:inline-block;font-size:12.5px;font-weight:600;color:#1F6FB2;background:#EEF5FC;border:1px solid #CFE2F3;border-radius:8px;padding:6px 11px;text-decoration:none;}
   .artlink:hover{background:#DCEBF8;}
-  /* 종목 미상 우대법령 섹션 */
-  .nocert{margin:24px 0 8px;border:1px solid #E3E7EC;border-radius:12px;background:#fff;overflow:hidden;}
-  .nocert summary{list-style:none;cursor:pointer;padding:14px 18px;font-size:14.5px;font-weight:700;color:var(--navy,#1F3864);display:flex;align-items:center;gap:8px;}
-  .nocert summary::-webkit-details-marker{display:none;}
-  .nc-ic{font-size:16px;} .nc-cnt{font-size:12.5px;font-weight:600;color:#fff;background:#8A8F98;border-radius:10px;padding:1px 9px;}
-  .nocert summary .cg-arrow{margin-left:auto;color:#8A8F98;transition:transform .2s;}
-  .nocert[open] summary .cg-arrow{transform:rotate(180deg);}
-  .nc-body{padding:6px 18px 18px;border-top:1px solid #EEF1F4;}
-  .nc-desc{font-size:13px;line-height:1.65;color:#5B6B7B;background:#F7F9FB;border-radius:8px;padding:11px 13px;margin:12px 0 14px;}
+  /* 종목 미상 — 그리드 위 배너 버튼 */
+  .nocert-banner{width:100%;display:flex;align-items:center;gap:12px;margin:0 0 18px;padding:14px 18px;
+    background:linear-gradient(0deg,#FFFDF6,#FFF8E8);border:1px solid #F2D98A;border-radius:12px;cursor:pointer;text-align:left;font:inherit;}
+  .nocert-banner:hover{background:#FFF3D6;border-color:#E9C766;}
+  .nocert-banner .nc-ic{font-size:20px;flex:none;}
+  .nc-btxt{font-size:15px;color:#1F2937;} .nc-btxt b{color:var(--navy,#1F3864);}
+  .nocert-banner .nc-cnt{font-size:12.5px;font-weight:700;color:#fff;background:#C28A2B;border-radius:10px;padding:1px 9px;margin-left:4px;}
+  .nc-bsub{margin-left:auto;font-size:12.5px;color:#8A7A4A;white-space:nowrap;}
+  /* 종목 미상 — 팝업 내용 */
+  .nc-desc{font-size:13px;line-height:1.65;color:#5B6B7B;background:#F7F9FB;border-radius:8px;padding:11px 13px;margin:0 0 14px;}
   .nc-item{padding:12px 0;border-bottom:1px solid #F0F2F5;}
   .nc-item:last-child{border-bottom:none;}
   .nc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -431,6 +440,7 @@ PAGE = r"""<!DOCTYPE html>
   .nc-r{font-size:12.5px;color:#8A5A00;background:#FFF8E8;border:1px solid #F2D98A;border-radius:7px;padding:7px 10px;margin-top:7px;line-height:1.55;}
   .nc-ext{display:inline-block;margin-top:8px;font-size:12.5px;font-weight:600;color:#1F6FB2;text-decoration:none;}
   .nc-ext:hover{text-decoration:underline;}
+  @media(max-width:560px){.nc-bsub{display:none;}}
   .m2-law{font-size:20px;font-weight:800;color:var(--ink);margin:0 30px 2px 0;} .m2-art{font-size:13px;color:var(--muted);}
   .trk{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#FAFBFD;}
   .trk .k{font-size:12px;font-weight:700;color:var(--navy);} .trk .v{font-size:14.5px;font-weight:700;color:var(--ink);margin-top:3px;}
@@ -552,7 +562,7 @@ PAGE = r"""<!DOCTYPE html>
       <input id="qr" type="search" placeholder="자격증 이름으로 검색 (예: 전기기사)" aria-label="검색"></div>
     <span class="count">자격증 <b id="cntr">0</b>개</span>
   </div></div></div>
-  <main><div class="wrap"><div class="grid rgrid" id="grid-r">@@R_CARDS@@</div><p class="noresult" id="nores-r">해당 자격증이 없습니다.</p>@@NOCERT@@</div></main>
+  <main><div class="wrap">@@NOCERT@@<div class="grid rgrid" id="grid-r">@@R_CARDS@@</div><p class="noresult" id="nores-r">해당 자격증이 없습니다.</p></div></main>
 </section>
 
 <footer><div class="wrap"><b>안내</b> · 이 페이지는 AI가 법령 원문을 분석하고 정리하였습니다. 정확한 법적 효력은 반드시 <a href="https://www.law.go.kr" target="_blank" rel="noopener" style="color:var(--accent)">국가법령정보센터</a> 원문을 확인하세요. 출처: 국가법령정보센터 | 생성일 @@BUILT_AT@@ | 한국산업인력공단 실증(PoC)</div></footer>
@@ -562,6 +572,7 @@ PAGE = r"""<!DOCTYPE html>
 
 <script>
 var MLAWS=@@MLAWS@@, RCERTS=@@RCERTS@@, RENTRIES=@@RENTRIES@@, T1TYPE=@@T1TYPE@@, T1RISK=@@T1RISK@@, T2=@@T2@@, PFC=@@PFC@@;
+var NOCERT=@@NOCERT_JSON@@;
 function escq(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function tok(v){return String(v||'').split(' ')[0].trim();}
 function lawUrl(n){return 'https://www.law.go.kr/법령/'+encodeURIComponent(String(n||'').trim());}
@@ -609,6 +620,27 @@ function sec(t,inner){return inner?'<div class="m-sec"><h4>'+t+'</h4>'+inner+'</
 function openM(modalEl){modalEl.classList.add('open');modalEl.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';var p=modalEl.querySelector('.modal-panel');if(p)p.scrollTop=0;}
 function closeModal(){modal.classList.remove('open');modal.setAttribute('aria-hidden','true');if(!modal2.classList.contains('open'))document.body.style.overflow='';}
 function closeModal2(){modal2.classList.remove('open');modal2.setAttribute('aria-hidden','true');}
+
+// 종목 미상 우대법령 팝업
+function openNocert(){
+  if(!NOCERT||!NOCERT.length)return;
+  var items=NOCERT.map(function(x){
+    var h='<div class="nc-item"><div class="nc-h">'+pfBadge(x.p||'기타')+'<span class="nc-law">'+escq(x.law)+'</span>';
+    if(x.e)h+='<span class="law-eff">시행 '+escq(x.e)+'</span>';
+    h+='</div>';
+    if(x.a)h+='<div class="nc-art">'+escq(x.a)+'</div>';
+    if(x.r)h+='<div class="nc-r">📌 '+escq(x.r)+'</div>';
+    h+='<a class="nc-ext" href="'+escq(x.u)+'" target="_blank" rel="noopener">법제처에서 원문 확인 →</a></div>';
+    return h;
+  }).join('');
+  mb2.innerHTML='<h2 class="m2-law">🔎 종목 미상 우대법령 <span class="nc-cnt">'+NOCERT.length+'건</span></h2>'
+    +'<p class="nc-desc">아래 법령은 국가기술자격 취득자에 대한 <b>우대 조항은 확인되었으나</b>, '
+    +'구체적인 자격 종목이 별표·하위 규정·채용공고 등에 위임되어 있어 <b>개별 종목을 특정하지 못한</b> 경우입니다. '
+    +'실제 적용 종목은 각 법령 원문(특히 별표)을 직접 확인해 주세요.</p>'+items;
+  openM(modal2);
+}
+var ncBtn=document.getElementById('nocert-open');
+if(ncBtn)ncBtn.addEventListener('click',openNocert);
 
 // monitor 법령 상세
 function openMonitor(i){var d=MLAWS[i];if(!d)return;
