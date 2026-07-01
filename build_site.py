@@ -464,10 +464,6 @@ PAGE = r"""<!DOCTYPE html>
     <div class="eyebrow" id="heroPeriod"></div>
     <h1>선택한 기간 동안, 자격증과 관련된<br><strong id="heroN">0</strong>건의 법령이 바뀌었습니다.</h1>
     <p class="lead">매일 새벽 국가법령정보센터를 자동으로 살펴, 국가기술자격과 관련된 제·개정 법령만 골라 정리합니다. 기간을 선택하거나 검색해 보세요.</p>
-    <div class="stats">
-      <div class="stat"><div class="n" id="statLaws">0</div><div class="l">관련 법령(선택 기간)</div></div>
-      <div class="stat"><div class="n">@@M_TOTAL_CERTS@@</div><div class="l">연관 자격종목(전체)</div></div>
-    </div>
   </div></div>
   <div class="toolbar"><div class="wrap">
     <div class="trow period"><span>기간</span>
@@ -600,7 +596,7 @@ function hay(c){var o=MLAWS[+c.dataset.i];var s=scope.value;return s==='law'?o._
 function fmtM(m){return m?m.slice(0,4)+'.'+m.slice(4,6):'';}
 function filterM(){var term=(qm.value||'').trim().toLowerCase();var a=mfrom.value,b=mto.value;if(a>b){var t=a;a=b;b=t;}var s=0;
   mcards.forEach(function(c){var on=(c.dataset.month>=a&&c.dataset.month<=b)&&(!term||(hay(c)||'').indexOf(term)!==-1);c.style.display=on?'':'none';if(on)s++;});
-  document.getElementById('cnt').textContent=s;document.getElementById('heroN').textContent=s;document.getElementById('statLaws').textContent=s;
+  document.getElementById('cnt').textContent=s;document.getElementById('heroN').textContent=s;
   document.getElementById('heroPeriod').textContent=fmtM(a)+' ~ '+fmtM(b)+' 기간';nresM.style.display=s?'none':'block';}
 [qm,scope,mfrom,mto].forEach(function(el){el.addEventListener('input',filterM);el.addEventListener('change',filterM);});
 filterM();
